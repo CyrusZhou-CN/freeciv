@@ -55,12 +55,18 @@ Savegame [scenario] section can have following fields
 - startpos_nations
   Whether nations should use start positions defined in the scenario map
 
-- prevent new cities
+- prevent_new_cities
   Is founding new cities prevented in the scenario, locking it to cities
   present on the map
 
 - lake_flooding
-  Should ocean tiles connecting to a lake tile flood the lake tile
+  Should ocean tiles connecting to a lake tile flood the lake tile.
+  Default is TRUE, and it's discouraged to disable it in new scenarios.
+  This possibility to disable flooding exist for supporting older
+  scenario maps created before flooding feature came to being, and which
+  would now work badly with the flooding enabled. New scenario maps
+  should be designed from the beginning so that the lake flooding is
+  not an issue.
 
 - handmade
   Set to TRUE when savegame file is manually edited. This has no gameplay
@@ -81,6 +87,16 @@ Savegame [scenario] section can have following fields
 
 - datafile
   Luadata to load. See chapter 'Luadata' for details
+
+
+[player<num>] section additions:
+--------------------------------
+When saved in scenario mode, player sections have additional field:
+
+- autoselect_weight
+  When a user (client) connects, and there are free players with autoselect_weight
+  above zero, user gets automatically attached to one of those. The exact weight
+  determines how likely each of them is to get automatically chosen.
 
 
 Luadata:

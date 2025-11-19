@@ -346,11 +346,18 @@ static bool update_last_part(struct goto_map *goto_map,
       }
 
       p->path = old_path;
-      p->end_tile = pf_path_last_position(old_path)->tile;
-      p->end_moves_left = pf_path_last_position(old_path)->moves_left;
-      p->end_fuel_left = pf_path_last_position(old_path)->fuel_left;
+
+      if (p->path != NULL) {
+        const struct pf_position *pos = pf_path_last_position(old_path);
+
+        p->end_tile = pos->tile;
+        p->end_moves_left = pos->moves_left;
+        p->end_fuel_left = pos->fuel_left;
+      }
+
       pf_path_destroy(new_path);
       reset_last_part(goto_map);
+
       return FALSE;
     }
 
@@ -564,7 +571,7 @@ static enum tile_behavior get_TB_aggr(const struct tile *ptile,
       return TB_IGNORE;
     }
   } else if (is_non_allied_unit_tile(ptile, param->owner)
-	     || is_non_allied_city_tile(ptile, param->owner)) {
+             || is_non_allied_city_tile(ptile, param->owner)) {
     /* Can attack but can't count on going through */
     return TB_DONT_LEAVE;
   }
@@ -887,7 +894,7 @@ static void goto_fill_parameter_base(struct pf_parameter *parameter,
   fc_assert(parameter->get_TB == NULL);
   fc_assert(parameter->get_MC != NULL);
   fc_assert(parameter->start_tile == unit_tile(punit));
-  fc_assert(parameter->omniscience == FALSE);
+  fc_assert(!parameter->omniscience);
 
   parameter->get_EC = get_EC;
   if (utype_acts_hostile(unit_type_get(punit))) {
@@ -956,9 +963,8 @@ static void goto_fill_parameter_full(struct goto_map *goto_map,
     break;
   case HOVER_GOTO:
   case HOVER_PATROL:
-    if (action_id_has_result_safe(goto_last_action, ACTION_NUKE_UNITS)
-        || action_id_has_result_safe(goto_last_action, ACTION_NUKE_CITY)
-        || action_id_has_result_safe(goto_last_action, ACTION_NUKE)) {
+    if (action_id_has_result_safe(goto_last_action, ACTRES_NUKE_UNITS)
+        || action_id_has_result_safe(goto_last_action, ACTRES_NUKE)) {
       /* TODO: consider doing the same for other actor consuming actions. */
       /* We only want targets reachable immediatly... */
       parameter->move_rate = 0;
@@ -968,6 +974,10 @@ static void goto_fill_parameter_full(struct goto_map *goto_map,
     } else {
       goto_map->patrol.return_path = NULL;
     }
+    break;
+  case HOVER_GOTO_SEL_TGT:
+    fc_assert_msg(hover_state != HOVER_GOTO_SEL_TGT,
+                  "Path finding during target selection");
     break;
   case HOVER_NONE:
   case HOVER_PARADROP:
@@ -1170,7 +1180,7 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
         }
 
         path = goto_map->parts[i].path;
-        if (path == NULL) {
+        if (path == NULL || path->length == 0) {
           continue;
         }
 
@@ -1196,17 +1206,18 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
       }
 
       if (ptile == goto_destination) {
-        fc_assert_ret_val(pos != NULL, FALSE);
+        int ml = (pos != NULL ? pos->moves_left : 0);
+
         if (moved && activity_time > 0) {
           map_turns++;
         }
         if (map_turns > *turns) {
-          *state = (activity_time > 0 || pos->moves_left == 0
+          *state = (activity_time > 0 || ml == 0
                     ? GTS_EXHAUSTED_MP : GTS_MP_LEFT);
           *turns = map_turns;
         } else if (map_turns == *turns
                    && *state == GTS_MP_LEFT
-                   && (activity_time > 0 || pos->moves_left == 0)) {
+                   && (activity_time > 0 || ml == 0)) {
           *state = GTS_EXHAUSTED_MP;
         }
       } else {
@@ -1225,6 +1236,7 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
     } goto_map_list_iterate_end;
   } else {
     bool mark_on_map = FALSE;
+
     /* In other modes, we want to know the turn number to reach the tile. */
     goto_map_list_iterate(goto_maps, goto_map) {
       const struct tile *destination;
@@ -1241,7 +1253,7 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
         }
 
         path = goto_map->parts[i].path;
-        if (path == NULL) {
+        if (path == NULL || path->length == 0) {
           continue;
         }
         last_pos = path->positions;
@@ -1270,8 +1282,10 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
       }
 
       if (hover_state == HOVER_PATROL
-          && goto_map->patrol.return_path != NULL) {
+          && goto_map->patrol.return_path != NULL
+          && goto_map->patrol.return_path->length > 0) {
         path = goto_map->patrol.return_path;
+
         for (j = 0; j < path->length; j++) {
           pos = path->positions + j;
           if (pos->tile == ptile
@@ -1290,14 +1304,15 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
       }
 
       if (ptile == destination) {
-        fc_assert_ret_val(pos != NULL, FALSE);
+        int ml = (pos != NULL ? pos->moves_left : 0);
+
         if (map_turns > *turns) {
           mark_on_map = TRUE;
-          *state = (pos->moves_left == 0 ? GTS_EXHAUSTED_MP : GTS_MP_LEFT);
+          *state = (ml == 0 ? GTS_EXHAUSTED_MP : GTS_MP_LEFT);
           *turns = map_turns;
         } else if (map_turns == *turns
                    && *state == GTS_MP_LEFT
-                   && pos->moves_left == 0) {
+                   && ml == 0) {
           *state = GTS_EXHAUSTED_MP;
         }
       } else {
@@ -1307,6 +1322,7 @@ bool goto_tile_state(const struct tile *ptile, enum goto_tile_state *state,
         }
       }
     } goto_map_list_iterate_end;
+
     return mark_on_map;
   }
 
@@ -1358,6 +1374,7 @@ void request_orders_cleared(struct unit *punit)
   p.repeat = p.vigilant = FALSE;
   p.length = 0;
   p.dest_tile = tile_index(unit_tile(punit));
+  request_unit_ssa_set(punit, SSA_NONE);
   send_packet_unit_orders(&client.conn, &p);
 }
 
@@ -1392,14 +1409,16 @@ static void make_path_orders(struct unit *punit, struct pf_path *path,
       order_list[i].order = ORDER_FULL_MP;
       order_list[i].dir = DIR8_ORIGIN;
       order_list[i].activity = ACTIVITY_LAST;
-      order_list[i].sub_target = -1;
+      order_list[i].target = NO_TARGET;
+      order_list[i].sub_target = NO_TARGET;
       order_list[i].action = ACTION_NONE;
       log_goto_packet("  packet[%d] = wait: %d,%d", i, TILE_XY(old_tile));
     } else {
       order_list[i].order = orders;
       order_list[i].dir = get_direction_for_step(&(wld.map), old_tile, new_tile);
       order_list[i].activity = ACTIVITY_LAST;
-      order_list[i].sub_target = -1;
+      order_list[i].target = NO_TARGET;
+      order_list[i].sub_target = NO_TARGET;
       order_list[i].action = ACTION_NONE;
       log_goto_packet("  packet[%d] = move %s: %d,%d => %d,%d",
                       i, dir_get_name(order_list[i].dir),
@@ -1410,8 +1429,8 @@ static void make_path_orders(struct unit *punit, struct pf_path *path,
 
   if (i > 0
       && order_list[i - 1].order == ORDER_MOVE
-      && (is_non_allied_city_tile(old_tile, client_player()) != NULL
-          || is_non_allied_unit_tile(old_tile, client_player()) != NULL)) {
+      && (is_non_allied_city_tile(old_tile, client_player())
+          || is_non_allied_unit_tile(old_tile, client_player()))) {
     /* Won't be able to perform a regular move to the target tile... */
     if (!final_order) {
       /* ...and no final order exists. Choose what to do when the unit gets
@@ -1422,7 +1441,7 @@ static void make_path_orders(struct unit *punit, struct pf_path *path,
        * caller hope that the situation would change before the unit got
        * there? */
 
-      /* It's currently illegal to walk into tiles with non allied units or
+      /* It's currently illegal to walk into tiles with non-allied units or
        * cities. Some actions causes the actor to enter the target tile but
        * that is a part of the action it self, not a regular pre action
        * move. */
@@ -1437,6 +1456,7 @@ static void make_path_orders(struct unit *punit, struct pf_path *path,
     order_list[i].dir = final_order->dir;
     order_list[i].activity = (final_order->order == ORDER_ACTIVITY)
       ? final_order->activity : ACTIVITY_LAST;
+    order_list[i].target = final_order->target;
     order_list[i].sub_target = final_order->sub_target;
     order_list[i].action = final_order->action;
     (*length)++;
@@ -1474,6 +1494,7 @@ static void send_path_orders(struct unit *punit, struct pf_path *path,
   make_path_orders(punit, path, orders, final_order,
                    p.orders, &p.length, &p.dest_tile);
 
+  request_unit_ssa_set(punit, SSA_NONE);
   send_packet_unit_orders(&client.conn, &p);
 }
 
@@ -1488,7 +1509,7 @@ static void send_rally_path_orders(struct city *pcity, struct unit *punit,
   struct packet_city_rally_point p;
 
   memset(&p, 0, sizeof(p));
-  p.city_id = pcity->id;
+  p.id = pcity->id;
   p.vigilant = vigilant;
 
   log_goto_packet("Rally orders for city %d:", pcity->id);
@@ -1497,7 +1518,7 @@ static void send_rally_path_orders(struct city *pcity, struct unit *punit,
   make_path_orders(punit, path, orders, final_order,
                    p.orders, &p.length, NULL);
 
-  send_packet_city_rally_point(&client.conn, &p);
+  send_packet_city_rally_point(&client.conn, &p, FALSE);
 }
 
 /************************************************************************//**
@@ -1549,12 +1570,15 @@ bool send_goto_tile(struct unit *punit, struct tile *ptile)
 ****************************************************************************/
 bool send_rally_tile(struct city *pcity, struct tile *ptile)
 {
-  struct unit_type *putype;
+  const struct unit_type *putype;
   struct unit *punit;
 
   struct pf_parameter parameter;
   struct pf_map *pfm;
   struct pf_path *path;
+
+  fc_assert_ret_val(pcity != NULL, FALSE);
+  fc_assert_ret_val(ptile != NULL, FALSE);
 
   /* Create a virtual unit of the type being produced by the city. */
   if (pcity->production.kind != VUT_UTYPE) {
@@ -1652,6 +1676,11 @@ static bool order_recursive_roads(struct tile *ptile, struct extra_type *pextra,
     return FALSE;
   }
 
+  if (tile_has_extra(ptile, pextra)) {
+    /* No need to build what is already there. */
+    return TRUE;
+  }
+
   extra_deps_iterate(&(pextra->reqs), pdep) {
     if (!tile_has_extra(ptile, pdep)) {
       if (!order_recursive_roads(ptile, pdep, p, rec + 1)) {
@@ -1660,11 +1689,12 @@ static bool order_recursive_roads(struct tile *ptile, struct extra_type *pextra,
     }
   } extra_deps_iterate_end;
 
-  p->orders[p->length].order = ORDER_ACTIVITY;
+  p->orders[p->length].order = ORDER_PERFORM_ACTION;
   p->orders[p->length].dir = DIR8_ORIGIN;
-  p->orders[p->length].activity = ACTIVITY_GEN_ROAD;
+  p->orders[p->length].activity = ACTIVITY_LAST;
+  p->orders[p->length].target = ptile->index;
   p->orders[p->length].sub_target = extra_index(pextra);
-  p->orders[p->length].action = ACTION_NONE;
+  p->orders[p->length].action = ACTION_ROAD;
   p->length++;
 
   return TRUE;
@@ -1709,11 +1739,12 @@ void send_connect_route(enum unit_activity activity,
       case ACTIVITY_IRRIGATE:
 	if (!tile_has_extra(old_tile, tgt)) {
 	  /* Assume the unit can irrigate or we wouldn't be here. */
-	  p.orders[p.length].order = ORDER_ACTIVITY;
+          p.orders[p.length].order = ORDER_PERFORM_ACTION;
           p.orders[p.length].dir = DIR8_ORIGIN;
-	  p.orders[p.length].activity = ACTIVITY_IRRIGATE;
+          p.orders[p.length].activity = ACTIVITY_LAST;
+          p.orders[p.length].target = old_tile->index;
           p.orders[p.length].sub_target = extra_index(tgt);
-          p.orders[p.length].action = ACTION_NONE;
+          p.orders[p.length].action = ACTION_IRRIGATE;
 	  p.length++;
 	}
 	break;
@@ -1734,7 +1765,8 @@ void send_connect_route(enum unit_activity activity,
         p.orders[p.length].dir = get_direction_for_step(&(wld.map),
                                                         old_tile, new_tile);
         p.orders[p.length].activity = ACTIVITY_LAST;
-        p.orders[p.length].sub_target = -1;
+        p.orders[p.length].target = NO_TARGET;
+        p.orders[p.length].sub_target = NO_TARGET;
         p.orders[p.length].action = ACTION_NONE;
         p.length++;
 
@@ -1744,6 +1776,7 @@ void send_connect_route(enum unit_activity activity,
 
     p.dest_tile = tile_index(old_tile);
 
+    request_unit_ssa_set(punit, SSA_NONE);
     send_packet_unit_orders(&client.conn, &p);
   } goto_map_unit_iterate_end;
 }
@@ -1775,12 +1808,18 @@ static bool order_wants_direction(enum unit_orders order, action_id act_id,
       return FALSE;
     }
 
-    if (is_non_allied_city_tile(tgt_tile, client_player()) != NULL
-        || is_non_allied_unit_tile(tgt_tile, client_player()) != NULL) {
+    if (is_non_allied_city_tile(tgt_tile, client_player())
+        || is_non_allied_unit_tile(tgt_tile, client_player())) {
       /* Won't be able to move to the target tile to perform the action on
        * top of it. */
-      /* TODO: detect situations where it also would be illegal to perform
+      /* TODO: Detect situations where it also would be illegal to perform
        * the action from the neighbor tile. */
+      return TRUE;
+    }
+
+    if (gui_options.popup_last_move_to_allied) {
+      /* Prefer efficiency over safety among allies. */
+      fc_assert_ret_val(action_id_distance_accepted(act_id, 1), FALSE);
       return TRUE;
     }
 
@@ -1844,8 +1883,8 @@ void send_goto_route(void)
      * selection dialog rather than moving to the last tile if it contains
      * a domestic, allied or team mate city, unit or unit stack. This can,
      * in cases where the action requires movement left, save a turn. */
-    /* TODO: Should this be a client option? */
-    if (goto_last_order == ORDER_LAST
+    if (gui_options.popup_last_move_to_allied
+        && goto_last_order == ORDER_LAST
         && ((is_allied_city_tile(tgt_tile, client_player())
              || is_allied_unit_tile(tgt_tile, client_player()))
             && (can_utype_do_act_if_tgt_diplrel(unit_type_get(punit),
@@ -1865,6 +1904,12 @@ void send_goto_route(void)
       goto_last_order = ORDER_ACTION_MOVE;
     }
 
+    /* Handle single-step goto like single-step move. */
+    if (goto_last_order == ORDER_LAST && path->length == 2
+        && gui_options.popup_last_move_to_allied) {
+      goto_last_order = ORDER_ACTION_MOVE;
+    }
+
     if (goto_last_order == ORDER_LAST) {
       send_goto_path(punit, path, NULL);
     } else if (path->length > 1
@@ -1873,8 +1918,9 @@ void send_goto_route(void)
       struct unit_order order;
       int last_order_dir;
       struct tile *on_tile;
+      int last_order_target = NO_TARGET;
 
-      if (path->length > 1
+      if (path->length > 1 && goto_last_tgt == NO_TARGET
           && ((on_tile = path->positions[path->length - 2].tile))
           && order_wants_direction(goto_last_order, goto_last_action,
                                    tgt_tile)
@@ -1888,16 +1934,24 @@ void send_goto_route(void)
         /* The last path direction is now spent. */
         pf_path_backtrack(path, on_tile);
       } else {
-        fc_assert(!order_demands_direction(goto_last_order,
-                                           goto_last_action));
+        fc_assert(goto_last_tgt != NO_TARGET
+                  || !order_demands_direction(goto_last_order,
+                                              goto_last_action));
 
-        /* Target the tile the actor is standing on. */
+        /* Target the tile the actor is standing on or goto_last_tgt. */
+        last_order_dir = DIR8_ORIGIN;
+      }
+
+      if (action_id_exists(goto_last_action)) {
+        last_order_target = (goto_last_tgt == NO_TARGET
+                             ? tgt_tile->index : goto_last_tgt);
         last_order_dir = DIR8_ORIGIN;
       }
 
       order.order = goto_last_order;
       order.dir = last_order_dir;
       order.activity = ACTIVITY_LAST;
+      order.target = last_order_target;
       order.sub_target = goto_last_sub_tgt;
       order.action = goto_last_action;
 

@@ -21,19 +21,20 @@ extern "C" {
 #include "bitvector.h"
 
 /* common */
-#include "city.h"
 #include "connection.h"
 #include "effects.h"
 #include "fc_types.h"
 #include "multipliers.h"
-#include "nation.h"
 #include "shared.h"
 #include "spaceship.h"
 #include "style.h"
 #include "tech.h"
-#include "traits.h"
 #include "unitlist.h"
 #include "vision.h"
+
+struct ai_trait;
+struct city;
+struct nation_type;
 
 #define PLAYER_DEFAULT_TAX_RATE 0
 #define PLAYER_DEFAULT_SCIENCE_RATE 100
@@ -111,6 +112,7 @@ struct player_score {
   int units_killed;     /* Number of enemy units killed. */
   int units_lost;       /* Number of own units that died,
                          * by combat or otherwise. */
+  int units_used;       /* Number of own units that disappeared upon use */
   int culture;
   int game;             /* Total score you get in player dialog. */
 };
@@ -183,21 +185,11 @@ struct player_ai {
 #define SPECENUM_VALUE14NAME N_("Provided Casus Belli")
 #define SPECENUM_VALUE15 DRO_FOREIGN
 #define SPECENUM_VALUE15NAME N_("Foreign")
+#define SPECENUM_VALUE16 DRO_HAS_TEAM_EMBASSY
+#define SPECENUM_VALUE16NAME N_("Has team embassy")
+#define SPECENUM_VALUE17 DRO_HOSTS_TEAM_EMBASSY
+#define SPECENUM_VALUE17NAME N_("Hosts team embassy")
 #define SPECENUM_COUNT DRO_LAST
-#include "specenum_gen.h"
-
-/* How "large" a Casus Belli is. */
-#define SPECENUM_NAME casus_belli_range
-/* No one gets a Casus Belli. */
-#define SPECENUM_VALUE0 CBR_NONE
-#define SPECENUM_VALUE0NAME N_("No Casus Belli")
-/* Only the victim player gets a Casus Belli. */
-#define SPECENUM_VALUE1 CBR_VICTIM_ONLY
-#define SPECENUM_VALUE1NAME N_("Victim Casus Belli")
-/* Every other player, including the victim, gets a Casus Belli. */
-#define SPECENUM_VALUE2 CBR_INTERNATIONAL_OUTRAGE
-#define SPECENUM_VALUE2NAME N_("International Outrage")
-#define SPECENUM_COUNT CBR_LAST
 #include "specenum_gen.h"
 
 BV_DEFINE(bv_diplrel_all_reqs,
@@ -209,7 +201,7 @@ enum dipl_reason {
   DIPL_ALLIANCE_PROBLEM_US, DIPL_ALLIANCE_PROBLEM_THEM
 };
 
-/* the following are for "pacts" */
+/* The following are for "pacts" */
 struct player_diplstate {
   enum diplstate_type type; /* this player's disposition towards other */
   enum diplstate_type max_state; /* maximum treaty level ever had */
@@ -248,7 +240,18 @@ bool player_has_flag(const struct player *pplayer, enum plr_flag_id flag);
 #define set_as_human(plr) BV_CLR((plr)->flags, PLRF_AI)
 #define set_as_ai(plr) BV_SET((plr)->flags, PLRF_AI)
 
-struct player {
+struct multiplier_value
+{
+  /* Value currently in force. */
+  int value;
+  /* Value to be used next turn. */
+  int target;
+  /* Turn that value was last changed. */
+  int changed;
+};
+
+struct player
+{
   struct player_slot *slot;
   char name[MAX_LEN_NAME];
   char username[MAX_LEN_NAME];
@@ -274,6 +277,8 @@ struct player {
   /* Turn in which the player's revolution is over; see update_revolution. */
   int revolution_finishes;
 
+  int primary_capital_id;
+
   bv_player real_embassy;
   const struct player_diplstate **diplstates;
   struct nation_style *style;
@@ -296,8 +301,12 @@ struct player {
   bool is_connected;
   struct connection *current_conn;     /* non-null while handling packet */
   struct conn_list *connections;       /* will replace conn */
+  int autoselect_weight;               /* How likely scenario player is to get picked
+                                        * for an user to use. */
+
   bv_player gives_shared_vision;       /* bitvector those that give you
                                         * shared vision */
+  bv_player gives_shared_tiles;
   int wonders[B_LAST];              /* contains city id's, WONDER_NOT_BUILT,
                                      * or WONDER_LOST */
   struct attribute_block_s attribute_block;
@@ -307,10 +316,7 @@ struct player {
 
   struct rgbcolor *rgb;
 
-  /* Values currently in force. */
-  int multipliers[MAX_NUM_MULTIPLIERS];
-  /* Values to be used next turn. */
-  int multipliers_target[MAX_NUM_MULTIPLIERS];
+  struct multiplier_value multipliers[MAX_NUM_MULTIPLIERS];
 
   int history; /* National level culture - does not include culture of individual
                 * cities. */
@@ -326,7 +332,7 @@ struct player {
 
       struct player_tile *private_map;
 
-      /* Player can see inside his borders. */
+      /* Player can see inside their borders. */
       bool border_vision;
 
       bv_player really_gives_vision; /* takes into account that p3 may see
@@ -408,6 +414,7 @@ struct player *player_by_name_prefix(const char *name,
 struct player *player_by_user(const char *name);
 
 bool player_set_nation(struct player *pplayer, struct nation_type *pnation);
+#define player_nation(_plr_) (_plr_)->nation
 
 bool player_has_embassy(const struct player *pplayer,
                         const struct player *pplayer2);
@@ -415,6 +422,7 @@ bool player_has_real_embassy(const struct player *pplayer,
                              const struct player *pplayer2);
 bool player_has_embassy_from_effect(const struct player *pplayer,
                                     const struct player *pplayer2);
+bool team_has_embassy(const struct team *pteam, const struct player *tgt_player);
 
 int player_age(const struct player *pplayer);
 
@@ -454,7 +462,7 @@ int num_known_tech_with_flag(const struct player *pplayer,
 			     enum tech_flag_id flag);
 int player_get_expected_income(const struct player *pplayer);
 
-struct city *player_capital(const struct player *pplayer);
+struct city *player_primary_capital(const struct player *pplayer);
 
 const char *love_text(const int love);
 
@@ -493,6 +501,7 @@ static inline bool is_barbarian(const struct player *pplayer)
 }
 
 bool gives_shared_vision(const struct player *me, const struct player *them);
+bool gives_shared_tiles(const struct player *me, const struct player *them);
 
 void diplrel_mess_close(void);
 bool is_diplrel_between(const struct player *player1,
@@ -504,6 +513,7 @@ const char *diplrel_rule_name(int value);
 const char *diplrel_name_translation(int value);
 
 enum casus_belli_range casus_belli_range_for(const struct player *offender,
+                                             const struct unit_type *off_ut,
                                              const struct player *tgt_plr,
                                              const enum effect_type outcome,
                                              const struct action *paction,

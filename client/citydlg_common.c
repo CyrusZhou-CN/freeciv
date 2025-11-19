@@ -278,10 +278,16 @@ void get_city_dialog_production(struct city *pcity,
     return;
   }
 
-  if (city_production_has_flag(pcity, IF_GOLD)) {
-    int gold = MAX(0, pcity->surplus[O_SHIELD]);
-    fc_snprintf(buffer, buffer_len, PL_("%3d gold per turn",
-                                        "%3d gold per turn", gold), gold);
+  if (city_production_is_genus(pcity, IG_CONVERT)) {
+    if (city_production_has_flag(pcity, IF_GOLD)) {
+      int gold = MAX(0, pcity->surplus[O_SHIELD]);
+
+      fc_snprintf(buffer, buffer_len,
+                  PL_("%3d gold per turn", "%3d gold per turn", gold),
+                  gold);
+    } else {
+      fc_strlcpy(buffer, "---", buffer_len);
+    }
     return;
   }
 
@@ -315,7 +321,7 @@ void get_city_dialog_production(struct city *pcity,
  Pretty sprints the info about a production (name, info, cost, turns
  to build) into a single text string.
 
- This is very similar to get_city_dialog_production_row; the
+ This is very similar to get_city_dialog_production_row(); the
  difference is that instead of placing the data into an array of
  strings it all goes into one long string.  This means it can be used
  by frontends that do not use a tabled structure, but it also gives
@@ -334,10 +340,14 @@ void get_city_dialog_production_full(char *buffer, size_t buffer_len,
                city_improvement_name_translation(pcity, target->value.building),
                buffer_len);
 
-    if (improvement_has_flag(target->value.building, IF_GOLD)) {
-      cat_snprintf(buffer, buffer_len, " (--) ");
-      cat_snprintf(buffer, buffer_len, _("%d/turn"),
-                   MAX(0, pcity->surplus[O_SHIELD]));
+    if (is_convert_improvement(target->value.building)) {
+      fc_strlcat(buffer, " (--) ", buffer_len);
+      if (improvement_has_flag(target->value.building, IF_GOLD)) {
+        cat_snprintf(buffer, buffer_len, _("%d/turn"),
+                     MAX(0, pcity->surplus[O_SHIELD]));
+      } else {
+        fc_strlcat(buffer, "---", buffer_len);
+      }
       return;
     }
     break;
@@ -359,30 +369,32 @@ void get_city_dialog_production_full(char *buffer, size_t buffer_len,
 /**********************************************************************//**
   Pretty sprints the info about a production in 4 columns (name, info,
   cost, turns to build). The columns must each have a size of
-  column_size bytes.  City may be NULL.
+  column_size bytes. City may be NULL.
 **************************************************************************/
 void get_city_dialog_production_row(char *buf[], size_t column_size,
                                     struct universal *target,
                                     struct city *pcity)
 {
+  struct player *pplayer = pcity ? city_owner(pcity) : client_player();
+
   universal_name_translation(target, buf[0], column_size);
 
   switch (target->kind) {
   case VUT_UTYPE:
   {
-    struct unit_type *ptype = target->value.utype;
+    const struct unit_type *ptype = target->value.utype;
 
     fc_strlcpy(buf[1], utype_values_string(ptype), column_size);
-    fc_snprintf(buf[2], column_size, "(%d)", utype_build_shield_cost(pcity, ptype));
+    fc_snprintf(buf[2], column_size, "(%d)",
+                utype_build_shield_cost(pcity, pplayer, ptype));
     break;
   }
   case VUT_IMPROVEMENT:
   {
-    struct player *pplayer = pcity ? city_owner(pcity) : client.conn.playing;
-    struct impr_type *pimprove = target->value.building;
+    const struct impr_type *pimprove = target->value.building;
 
-    /* Total & turns left meaningless on capitalization */
-    if (improvement_has_flag(pimprove, IF_GOLD)) {
+    /* Total & turns left meaningless on coinage-like improvements */
+    if (is_convert_improvement(pimprove)) {
       buf[1][0] = '\0';
       fc_snprintf(buf[2], column_size, "---");
     } else {
@@ -420,8 +432,13 @@ void get_city_dialog_production_row(char *buf[], size_t column_size,
         }
       }
 
-      fc_snprintf(buf[2], column_size, "%d",
-                  impr_build_shield_cost(pcity, pimprove));
+      if (pcity != NULL) {
+        fc_snprintf(buf[2], column_size, "%d",
+                    impr_build_shield_cost(pcity, pimprove));
+      } else {
+        fc_snprintf(buf[2], column_size, "%d",
+                    impr_estimate_build_shield_cost(pplayer, NULL, pimprove));
+      }
     }
     break;
   }
@@ -434,9 +451,14 @@ void get_city_dialog_production_row(char *buf[], size_t column_size,
   /* Add the turns-to-build entry in the 4th position */
   if (pcity) {
     if (VUT_IMPROVEMENT == target->kind
-        && improvement_has_flag(target->value.building, IF_GOLD)) {
-      fc_snprintf(buf[3], column_size, _("%d/turn"),
-                  MAX(0, pcity->surplus[O_SHIELD]));
+        && is_convert_improvement(target->value.building)) {
+      /* Coinage-like improvements: print yield-per-turn instead */
+      if (improvement_has_flag(target->value.building, IF_GOLD)) {
+        fc_snprintf(buf[3], column_size, _("%d/turn"),
+                    MAX(0, pcity->surplus[O_SHIELD]));
+      } else {
+        buf[3][0] = '\0';
+      }
     } else {
       int turns = city_turns_to_build(pcity, target, FALSE);
 
@@ -506,13 +528,13 @@ static void city_sum_add_real(struct city_sum *sum, double value,
 {
   size_t i;
 
-  /* likely to lead to quadratic behaviour, but who cares: */
+  /* Likely to lead to quadratic behaviour, but who cares: */
   for (i = 0; i < sum->n; i++) {
     fc_assert(sum->sums != NULL);
     if ((strcmp(sum->sums[i].posdesc, posdesc) == 0)
         && (strcmp(sum->sums[i].negdesc, negdesc) == 0)
         && ((sum->sums[i].auxfmt == auxfmt)
-            || (strcmp(sum->sums[i].auxfmt, auxfmt) == 0))
+            || (auxfmt != NULL && !strcmp(sum->sums[i].auxfmt, auxfmt)))
         && sum->sums[i].suppress_if_zero == suppress_if_zero) {
       /* Looks like we already have an entry like this. Accumulate values. */
       sum->sums[i].value += value;
@@ -773,6 +795,9 @@ void get_city_dialog_output_text(const struct city *pcity,
                      goods_name_translation(proute->goods),
                      name);
         break;
+      case RDIR_NONE:
+        fc_assert(proute->dir != RDIR_NONE);
+        break;
       }
     } trade_routes_iterate_end;
   } else if (otype == O_GOLD) {
@@ -782,8 +807,9 @@ void get_city_dialog_output_text(const struct city *pcity,
                             Q_("?city_surplus:Building tithes"));
   }
 
-  for (priority = 0; priority < 2; priority++) {
-    enum effect_type eft[] = {EFT_OUTPUT_BONUS, EFT_OUTPUT_BONUS_2};
+  for (priority = 0; priority < 3; priority++) {
+    enum effect_type eft[] = {EFT_OUTPUT_BONUS, EFT_OUTPUT_BONUS_2,
+                              EFT_OUTPUT_BONUS_ABSOLUTE};
 
     {
       int base = city_sum_total(sum), bonus = 100;
@@ -812,14 +838,23 @@ void get_city_dialog_output_text(const struct city *pcity,
         } else {
           delta = peffect->value;
         }
-        bonus += delta;
-	new_total = bonus * base / 100;
-        city_sum_add_full(sum, new_total - city_sum_total(sum), TRUE,
-                          /* TRANS: percentage city output bonus/loss from
-                           * some source; preserve leading space */
-                          Q_("?city_surplus: (%+.0f%%)"), delta,
-                          Q_("?city_surplus:Bonus from %s"),
-                          Q_("?city_surplus:Loss from %s"), buf2);
+
+        if (eft[priority] == EFT_OUTPUT_BONUS_ABSOLUTE) {
+          new_total = bonus * base / 100 + delta;
+          city_sum_add_full(sum, new_total - city_sum_total(sum), TRUE,
+                            NULL, 0,
+                            Q_("?city_surplus:Bonus from %s"),
+                            Q_("?city_surplus:Loss from %s"), buf2);
+        } else {
+          bonus += delta;
+          new_total = bonus * base / 100;
+          city_sum_add_full(sum, new_total - city_sum_total(sum), TRUE,
+                            /* TRANS: percentage city output bonus/loss from
+                             * some source; preserve leading space */
+                            Q_("?city_surplus: (%+.0f%%)"), delta,
+                            Q_("?city_surplus:Bonus from %s"),
+                            Q_("?city_surplus:Loss from %s"), buf2);
+        }
       } effect_list_iterate_end;
       effect_list_destroy(plist);
     }
@@ -1037,10 +1072,8 @@ void get_city_dialog_airlift_text(const struct city *pcity,
   char dest[512];
   int unlimited = 0;
 
-  if (game.info.airlifting_style & AIRLIFTING_UNLIMITED_SRC
-      && pcity->airlift >= 1) {
-    /* AIRLIFTING_UNLIMITED_SRC applies only when the source city has
-     * remaining airlift. */
+  if ((game.info.airlifting_style & AIRLIFTING_UNLIMITED_SRC)
+      && (pcity->airlift >= 1 || game.info.airlift_from_always_enabled)) {
 
     unlimited++;
 
@@ -1063,9 +1096,8 @@ void get_city_dialog_airlift_text(const struct city *pcity,
                 pcity->airlift);
   }
 
-  if (game.info.airlifting_style & AIRLIFTING_UNLIMITED_DEST) {
-    /* AIRLIFTING_UNLIMITED_DEST works even if the source city has no
-     * remaining airlift. */
+  if ((game.info.airlifting_style & AIRLIFTING_UNLIMITED_DEST)
+      && (pcity->airlift >= 1 || game.info.airlift_to_always_enabled)){
 
     unlimited++;
 
@@ -1110,53 +1142,51 @@ void get_city_dialog_airlift_value(const struct city *pcity,
   char dest[512];
   int unlimited = 0;
 
-  if (game.info.airlifting_style & AIRLIFTING_UNLIMITED_SRC
-      && pcity->airlift >= 1) {
-    /* AIRLIFTING_UNLIMITED_SRC applies only when the source city has
-     * remaining airlift. */
+  if ((game.info.airlifting_style & AIRLIFTING_UNLIMITED_SRC)
+      && (pcity->airlift >= 1 || game.info.airlift_from_always_enabled)) {
 
     unlimited++;
 
     /* TRANS: airlift. Possible take offs text. String is a symbol that
      * indicates that terms and conditions apply when landings are limited
      * and empty when they aren't limited. */
-    fc_snprintf(src, sizeof(src), _("∞%s"),
+    fc_snprintf(src, sizeof(src), _("   ∞%s"),
                 game.info.airlifting_style & AIRLIFTING_UNLIMITED_DEST
                 /* TRANS: airlift unlimited take offs may be spent symbol
                  * used above. */
-                ? "" : _("*"));
+                ? "" : Q_("?landings:*"));
   } else {
     /* TRANS: airlift. Possible take offs text. Number is
      * airlift capacity. */
-    fc_snprintf(src, sizeof(src), _("%d"), pcity->airlift);
+    fc_snprintf(src, sizeof(src), Q_("?takeoffs:%4d"), pcity->airlift);
   }
 
-  if (game.info.airlifting_style & AIRLIFTING_UNLIMITED_DEST) {
-    /* AIRLIFTING_UNLIMITED_DEST works even if the source city has no
-     * remaining airlift. */
+  if ((game.info.airlifting_style & AIRLIFTING_UNLIMITED_DEST)
+      && (pcity->airlift >= 1 || game.info.airlift_to_always_enabled)){
 
     unlimited++;
 
     /* TRANS: airlift. Possible landings text. */
-    fc_snprintf(dest, sizeof(dest), _("∞"));
+    fc_snprintf(dest, sizeof(dest), _("   ∞"));
   } else {
     /* TRANS: airlift. Possible landings text. */
-    fc_snprintf(dest, sizeof(dest), _("%d"), pcity->airlift);
+    fc_snprintf(dest, sizeof(dest), Q_("?landings:%4d"), pcity->airlift);
   }
 
   switch (unlimited) {
   case 2:
     /* TRANS: unlimited airlift take offs and landings */
-    fc_snprintf(buf, bufsz, _("∞"));
+    fc_snprintf(buf, bufsz, _("   ∞"));
     break;
   case 1:
     /* TRANS: airlift take offs and landings. One is unlimited. The first
-     * string is the take offs text. The 2nd string is the landings text. */
-    fc_snprintf(buf, bufsz, _("s: %s d: %s"), src, dest);
+     * string is the take offs text. The 2nd string is the landings text.
+     * For English, initials of d)epartures and a)rrivals were chosen. */
+    fc_snprintf(buf, bufsz, _("d: %s a: %s"), src, dest);
     break;
   default:
     /* TRANS: airlift take offs or landings, no unlimited */
-    fc_snprintf(buf, bufsz, _("%s"), src);
+    fc_snprintf(buf, bufsz, Q_("?airlifts:%s"), src);
     break;
   }
 }
@@ -1499,7 +1529,7 @@ bool city_can_buy(const struct city *pcity)
           && pcity->turn_founded != game.info.turn
           && !pcity->did_buy
           && (VUT_UTYPE == pcity->production.kind
-              || !improvement_has_flag(pcity->production.value.building, IF_GOLD))
+              || !is_convert_improvement(pcity->production.value.building))
           && !(VUT_UTYPE == pcity->production.kind
                && pcity->anarchy != 0)
           && pcity->client.buy_cost > 0);

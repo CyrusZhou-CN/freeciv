@@ -69,7 +69,9 @@ struct tile *tile_claimer(const struct tile *ptile)
 void tile_set_owner(struct tile *ptile, struct player *pplayer,
                     struct tile *claimer)
 {
-  if (BORDERS_DISABLED != game.info.borders) {
+  if (BORDERS_DISABLED != game.info.borders
+      /* City tiles are always owned by the city owner. */
+      || (tile_city(ptile) != NULL || ptile->owner != NULL)) {
     ptile->owner = pplayer;
     ptile->claimer = claimer;
   }
@@ -181,55 +183,41 @@ const bv_extras *tile_extras_safe(const struct tile *ptile)
 }
 
 /************************************************************************//**
-  Check if tile contains base providing effect
+  Check if tile contains extra making unit not aggressive.
+
+  Maximum distance to nearest friendly city to make extra effective returned.
+  Negative distance means that there's no such extra.
 ****************************************************************************/
-bool tile_has_base_flag(const struct tile *ptile, enum base_flag_id flag)
+int tile_has_not_aggressive_extra_for_unit(const struct tile *ptile,
+                                           const struct unit_type *punittype)
 {
-  extra_type_by_cause_iterate(EC_BASE, pextra) {
-    struct base_type *pbase = extra_base_get(pextra);
+  int max_friendliness_range = -1;
 
-    if (tile_has_extra(ptile, pextra) && base_has_flag(pbase, flag)) {
-      return TRUE;
-    }
-  } extra_type_by_cause_iterate_end;
-
-  return FALSE;
-}
-
-/************************************************************************//**
-  Check if tile contains base providing effect for unit
-****************************************************************************/
-bool tile_has_base_flag_for_unit(const struct tile *ptile,
-                                 const struct unit_type *punittype,
-                                 enum base_flag_id flag)
-{
-  extra_type_by_cause_iterate(EC_BASE, pextra) {
-    struct base_type *pbase = extra_base_get(pextra);
-
+  extra_type_by_cause_iterate(EC_NOT_AGGRESSIVE, pextra) {
     if (tile_has_extra(ptile, pextra)
-        && base_has_flag_for_utype(pbase, flag, punittype)) {
-      return TRUE;
+        && is_native_extra_to_utype(pextra, punittype)
+        && pextra->no_aggr_near_city > max_friendliness_range) {
+      max_friendliness_range = pextra->no_aggr_near_city;
     }
   } extra_type_by_cause_iterate_end;
 
-  return FALSE;
+  return max_friendliness_range;
 }
 
 /************************************************************************//**
-  Check if tile contains base providing effect for unit
+  Check if tile contains base providing effect for unit.
 ****************************************************************************/
 bool tile_has_claimable_base(const struct tile *ptile,
                              const struct unit_type *punittype)
 {
-  extra_type_by_cause_iterate(EC_BASE, pextra) {
+  extra_type_list_iterate(utype_class(punittype)->cache.native_bases, pextra) {
     struct base_type *pbase = extra_base_get(pextra);
 
     if (tile_has_extra(ptile, pextra)
-        && territory_claiming_base(pbase)
-        && is_native_extra_to_uclass(pextra, utype_class(punittype))) {
+        && territory_claiming_base(pbase)) {
       return TRUE;
     }
-  } extra_type_by_cause_iterate_end;
+  } extra_type_list_iterate_end;
 
   return FALSE;
 }
@@ -311,34 +299,31 @@ int tile_roads_output_bonus(const struct tile *ptile, enum output_type_id o)
 }
 
 /************************************************************************//**
-  Check if tile contains refuel extra native for unit
+  Check if tile contains refuel extra native for unit class
 ****************************************************************************/
 bool tile_has_refuel_extra(const struct tile *ptile,
-                           const struct unit_type *punittype)
+                           const struct unit_class *uclass)
 {
-  extra_type_iterate(pextra) {
-    if (tile_has_extra(ptile, pextra)
-        && extra_has_flag(pextra, EF_REFUEL)
-        && is_native_extra_to_utype(pextra, punittype)) {
+  extra_type_list_iterate(uclass->cache.refuel_extras, pextra) {
+    if (tile_has_extra(ptile, pextra)) {
       return TRUE;
     }
-  } extra_type_iterate_end;
+  } extra_type_list_iterate_end;
 
   return FALSE;
 }
 
 /************************************************************************//**
-  Check if tile contains base native for unit
+  Check if tile contains base native for unit.
 ****************************************************************************/
 bool tile_has_native_base(const struct tile *ptile,
                           const struct unit_type *punittype)
 {
-  extra_type_by_cause_iterate(EC_BASE, pextra) {
-    if (tile_has_extra(ptile, pextra)
-        && is_native_extra_to_utype(pextra, punittype)) {
+  extra_type_list_iterate(utype_class(punittype)->cache.native_bases, pextra) {
+    if (tile_has_extra(ptile, pextra)) {
       return TRUE;
     }
-  } extra_type_by_cause_iterate_end;
+  } extra_type_list_iterate_end;
 
   return FALSE;
 }
@@ -426,15 +411,25 @@ bool tile_is_seen(const struct tile *target_tile,
   See also action_get_act_time()
 ****************************************************************************/
 int tile_activity_time(enum unit_activity activity, const struct tile *ptile,
-                       struct extra_type *tgt)
+                       const struct extra_type *tgt)
 {
   struct terrain *pterrain = tile_terrain(ptile);
+  int eff = get_target_bonus_effects(NULL,
+                                     &(const struct req_context) {
+                                       .tile = ptile,
+                                       .activity = activity,
+                                       .extra = tgt
+                                     }, NULL, EFT_ACTIVITY_TIME);
 
-  /* Make sure nobody uses old activities */
-  fc_assert_ret_val(activity != ACTIVITY_FORTRESS
-                    && activity != ACTIVITY_AIRBASE, FC_INFINITY);
+  fc_assert(tgt != NULL || !is_targeted_activity(activity));
+
+  if (eff > 0) {
+    /* Use effect provided value */
+    return eff * ACTIVITY_FACTOR;
+  }
 
   switch (activity) {
+  case ACTIVITY_CLEAN:
   case ACTIVITY_POLLUTION:
   case ACTIVITY_FALLOUT:
   case ACTIVITY_PILLAGE:
@@ -442,17 +437,26 @@ int tile_activity_time(enum unit_activity activity, const struct tile *ptile,
   case ACTIVITY_TRANSFORM:
     return pterrain->transform_time * ACTIVITY_FACTOR;
   case ACTIVITY_CULTIVATE:
-    return pterrain->irrigation_time * ACTIVITY_FACTOR;
+    return pterrain->cultivate_time * ACTIVITY_FACTOR;
   case ACTIVITY_PLANT:
-    return pterrain->mining_time * ACTIVITY_FACTOR;
+    return pterrain->plant_time * ACTIVITY_FACTOR;
   case ACTIVITY_IRRIGATE:
   case ACTIVITY_MINE:
   case ACTIVITY_BASE:
   case ACTIVITY_GEN_ROAD:
     return terrain_extra_build_time(pterrain, activity, tgt) * ACTIVITY_FACTOR;
-  default:
-    return 0;
+  case ACTIVITY_IDLE:
+  case ACTIVITY_FORTIFIED:
+  case ACTIVITY_SENTRY:
+  case ACTIVITY_GOTO:
+  case ACTIVITY_EXPLORE:
+  case ACTIVITY_FORTIFYING:
+  case ACTIVITY_CONVERT:
+  case ACTIVITY_LAST:
+    return 0; /* FIXME: Should some of these be asserted against */
   }
+
+  return 0;
 }
 
 /************************************************************************//**
@@ -607,19 +611,10 @@ bool tile_extra_rm_apply(struct tile *ptile, struct extra_type *tgt)
 ****************************************************************************/
 static void tile_irrigate(struct tile *ptile, struct extra_type *tgt)
 {
-  struct terrain *pterrain = tile_terrain(ptile);
+  fc_assert(tgt != NULL);
 
-  if (pterrain == pterrain->irrigation_result) {
-    /* Ideally activity should already been cancelled before NULL tgt
-     * gets this far, but it's possible that terrain got changed from
-     * one that gets transformed by irrigation (-> NULL tgt) to one
-     * that does not (-> NULL tgt illegal) since legality of the action
-     * was last checked */
-    if (tgt != NULL) {
-      tile_extra_apply(ptile, tgt);
-    }
-  } else if (pterrain->irrigation_result) {
-    tile_change_terrain(ptile, pterrain->irrigation_result);
+  if (tgt != NULL) {
+    tile_extra_apply(ptile, tgt);
   }
 }
 
@@ -629,19 +624,10 @@ static void tile_irrigate(struct tile *ptile, struct extra_type *tgt)
 ****************************************************************************/
 static void tile_mine(struct tile *ptile, struct extra_type *tgt)
 {
-  struct terrain *pterrain = tile_terrain(ptile);
+  fc_assert(tgt != NULL);
 
-  if (pterrain == pterrain->mining_result) {
-    /* Ideally activity should already been cancelled before NULL tgt
-     * gets this far, but it's possible that terrain got changed from
-     * one that gets transformed by mining (-> NULL tgt) to one
-     * that does not (-> NULL tgt illegal) since legality of the action
-     * was last checked */
-    if (tgt != NULL) {
-      tile_extra_apply(ptile, tgt);
-    }
-  } else if (pterrain->mining_result) {
-    tile_change_terrain(ptile, pterrain->mining_result);
+  if (tgt != NULL) {
+    tile_extra_apply(ptile, tgt);
   }
 }
 
@@ -666,9 +652,8 @@ static void tile_plant(struct tile *ptile)
 {
   struct terrain *pterrain = tile_terrain(ptile);
 
-  if (pterrain->mining_result != T_NONE
-      && pterrain->mining_result != pterrain) {
-    tile_change_terrain(ptile, pterrain->mining_result);
+  if (pterrain->plant_result != T_NONE) {
+    tile_change_terrain(ptile, pterrain->plant_result);
   }
 }
 
@@ -680,9 +665,8 @@ static void tile_cultivate(struct tile *ptile)
 {
   struct terrain *pterrain = tile_terrain(ptile);
 
-  if (pterrain->irrigation_result != T_NONE
-      && pterrain->irrigation_result != pterrain) {
-    tile_change_terrain(ptile, pterrain->irrigation_result);
+  if (pterrain->cultivate_result != T_NONE) {
+    tile_change_terrain(ptile, pterrain->cultivate_result);
   }
 }
 
@@ -717,19 +701,13 @@ bool tile_apply_activity(struct tile *ptile, Activity_type_id act,
     tile_plant(ptile);
     return TRUE;
 
-  case ACTIVITY_OLD_ROAD:
-  case ACTIVITY_OLD_RAILROAD:
-  case ACTIVITY_FORTRESS:
-  case ACTIVITY_AIRBASE:
-    fc_assert(FALSE);
-    return FALSE;
-
   case ACTIVITY_PILLAGE:
   case ACTIVITY_BASE:
   case ACTIVITY_GEN_ROAD:
+  case ACTIVITY_CLEAN:
   case ACTIVITY_POLLUTION:
   case ACTIVITY_FALLOUT:
-    /* do nothing  - not implemented */
+    /* Do nothing  - not implemented */
     return FALSE;
 
   case ACTIVITY_IDLE:
@@ -738,15 +716,15 @@ bool tile_apply_activity(struct tile *ptile, Activity_type_id act,
   case ACTIVITY_GOTO:
   case ACTIVITY_EXPLORE:
   case ACTIVITY_CONVERT:
-  case ACTIVITY_UNKNOWN:
   case ACTIVITY_FORTIFYING:
-  case ACTIVITY_PATROL_UNUSED:
   case ACTIVITY_LAST:
-    /* do nothing - these activities have no effect
+    /* Do nothing - these activities have no effect
        on terrain type or tile extras */
     return FALSE;
   }
+
   fc_assert(FALSE);
+
   return FALSE;
 }
 
@@ -933,7 +911,7 @@ bool tile_has_conflicting_extra(const struct tile *ptile,
 }
 
 /************************************************************************//**
-  Returns TRUE if the given tile has a road of given type on it.
+  Returns TRUE if the given tile has an extra of the given type on it.
 ****************************************************************************/
 bool tile_has_visible_extra(const struct tile *ptile, const struct extra_type *pextra)
 {
@@ -987,6 +965,9 @@ void tile_remove_extra(struct tile *ptile, const struct extra_type *pextra)
 {
   if (pextra != NULL) {
     BV_CLR(ptile->extras, extra_index(pextra));
+    if (ptile->resource == pextra) {
+      ptile->resource = NULL;
+    }
   }
 }
 

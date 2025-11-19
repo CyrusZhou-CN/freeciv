@@ -92,7 +92,7 @@ static inline bool base_fc_utf8_char_validate(const char *utf8_char,
   if (1 < size) {
     do {
       utf8_char++;
-      if (0x80 != (0xC0 & *(unsigned char *) utf8_char)) {
+      if (0x80 != (0xC0 & *(const unsigned char *)utf8_char)) {
         /* Not a valid byte of the sequence. */
         return FALSE;
       }
@@ -201,16 +201,17 @@ bool fc_utf8_char_validate(const char *utf8_char)
   Jump to next UTF-8 character start.
 
   NB: This function can return a invalid UTF-8 character. Check with
-  fc_utf8_char_validate() to unsure.
+  fc_utf8_char_validate() to ensure.
 ****************************************************************************/
-char *fc_utf8_find_next_char(const char *utf8_char)
+const char *fc_utf8_find_next_char(const char *utf8_char)
 {
   fc_assert_ret_val(NULL != utf8_char, NULL);
 
   do {
     utf8_char++;
   } while (0 == FC_UTF8_CHAR_SIZE(utf8_char));
-  return (char *) utf8_char;
+
+  return utf8_char;
 }
 
 /************************************************************************//**
@@ -218,20 +219,21 @@ char *fc_utf8_find_next_char(const char *utf8_char)
   pointer. If no character is found, returns 'utf8_string'.
 
   NB: This function can return a invalid UTF-8 character. Check with
-  fc_utf8_char_validate() to unsure.
+  fc_utf8_char_validate() to ensure.
 ****************************************************************************/
-char *fc_utf8_find_prev_char(const char *utf8_char, const char *utf8_string)
+const char *fc_utf8_find_prev_char(const char *utf8_char,
+                                   const char *utf8_string)
 {
   fc_assert_ret_val(NULL != utf8_char, NULL);
 
   for (utf8_char--; utf8_char > utf8_string; utf8_char--) {
     if (0 != FC_UTF8_CHAR_SIZE(utf8_char)) {
-      return (char *) utf8_char;
+      return utf8_char;
     }
   }
-  return (char *) utf8_string;
-}
 
+  return utf8_string;
+}
 
 /************************************************************************//**
   Returns TRUE if the string 'utf8_string' contains only valid UTF-8
@@ -450,7 +452,7 @@ size_t fc_utf8_strlen(const char *utf8_string)
 
 
 /************************************************************************//**
-  This is a variant of fc_strlcpy() to unsure the result will be a valid
+  This is a variant of fc_strlcpy() to ensure the result will be a valid
   UTF-8 string. It truncates the string at the first UTF-8 invalid
   character.
 
@@ -466,7 +468,7 @@ size_t fc_utf8_strlcpy_trunc(char *dest, const char *src, size_t n)
 }
 
 /************************************************************************//**
-  This is a variant of fc_strlcpy() to unsure the result will be a valid
+  This is a variant of fc_strlcpy() to ensure the result will be a valid
   UTF-8 string. Unlike fc_utf8_strlcpy_trunc(), it replaces the invalid
   characters by the replacement character, instead of truncating the string.
 
@@ -482,7 +484,7 @@ size_t fc_utf8_strlcpy_rep(char *dest, const char *src, size_t n)
 }
 
 /************************************************************************//**
-  This is a variant of fc_strlcat() to unsure the result will be a valid
+  This is a variant of fc_strlcat() to ensure the result will be a valid
   UTF-8 string. It truncates the string at the first UTF-8 invalid
   character.
 
@@ -505,7 +507,7 @@ size_t fc_utf8_strlcat_trunc(char *dest, const char *src, size_t n)
 }
 
 /************************************************************************//**
-  This is a variant of fc_strlcat() to unsure the result will be a valid
+  This is a variant of fc_strlcat() to ensure the result will be a valid
   UTF-8 string. Unlike fc_utf8_strlcat_trunc(), it replaces the invalid
   characters by the replacement character, instead of truncating the string.
 
@@ -528,7 +530,7 @@ size_t fc_utf8_strlcat_rep(char *dest, const char *src, size_t n)
 }
 
 /************************************************************************//**
-  This is a variant of fc_snprintf() to unsure the result will be a valid
+  This is a variant of fc_snprintf() to ensure the result will be a valid
   UTF-8 string. It truncates the string at the first UTF-8 invalid
   character.
 
@@ -546,7 +548,7 @@ int fc_utf8_snprintf_trunc(char *str, size_t n, const char *format, ...)
 }
 
 /************************************************************************//**
-  This is a variant of fc_snprintf() to unsure the result will be a valid
+  This is a variant of fc_snprintf() to ensure the result will be a valid
   UTF-8 string. Unlike fc_utf8_snprintf_trunc(), it replaces the invalid
   characters by the replacement character, instead of truncating the string.
 
@@ -564,7 +566,7 @@ int fc_utf8_snprintf_rep(char *str, size_t n, const char *format, ...)
 }
 
 /************************************************************************//**
-  This is a variant of fc_vsnprintf() to unsure the result will be a valid
+  This is a variant of fc_vsnprintf() to ensure the result will be a valid
   UTF-8 string. It truncates the string at the first UTF-8 invalid
   character.
 
@@ -592,7 +594,7 @@ int fc_utf8_vsnprintf_trunc(char *str, size_t n, const char *format,
 }
 
 /************************************************************************//**
-  This is a variant of fc_vsnprintf() to unsure the result will be a valid
+  This is a variant of fc_vsnprintf() to ensure the result will be a valid
   UTF-8 string. Unlike fc_utf8_vsnprintf_trunc(), it replaces the invalid
   characters by the replacement character, instead of truncating the string.
 
@@ -619,7 +621,7 @@ int fc_utf8_vsnprintf_rep(char *str, size_t n, const char *format,
 }
 
 /************************************************************************//**
-  This is a variant of cat_snprintf() to unsure the result will be a valid
+  This is a variant of cat_snprintf() to ensure the result will be a valid
   UTF-8 string. It truncates the string at the first UTF-8 invalid
   character.
 
@@ -649,7 +651,7 @@ int cat_utf8_snprintf_trunc(char *str, size_t n, const char *format, ...)
 }
 
 /************************************************************************//**
-  This is a variant of cat_snprintf() to unsure the result will be a valid
+  This is a variant of cat_snprintf() to ensure the result will be a valid
   UTF-8 string. Unlike cat_utf8_snprintf_trunc(), it replaces the invalid
   characters by the replacement character, instead of truncating the string.
 

@@ -22,15 +22,24 @@
 
 void action_consequence_caught(const struct action *paction,
                                struct player *offender,
+                               const struct unit_type *offender_utype,
                                struct player *victim_player,
                                const struct tile *victim_tile,
                                const char *victim_link);
 
 void action_consequence_success(const struct action *paction,
                                 struct player *offender,
+                                const struct unit_type *offender_utype,
                                 struct player *victim_player,
                                 const struct tile *victim_tile,
                                 const char *victim_link);
+
+void action_consequence_complete(const struct action *paction,
+                                 struct player *offender,
+                                 const struct unit_type *offender_utype,
+                                 struct player *victim_player,
+                                 const struct tile *victim_tile,
+                                 const char *victim_link);
 
 void action_success_target_pay_mp(struct action *paction,
                                   int target_id, struct unit *target);
@@ -44,10 +53,6 @@ struct city *action_tgt_city(struct unit *actor, struct tile *target_tile,
 struct unit *action_tgt_unit(struct unit *actor, struct tile *target_tile,
                              bool accept_all_actions);
 
-struct tile *action_tgt_tile_units(struct unit *actor,
-                                   struct tile *target_tile,
-                                   bool accept_all_actions);
-
 struct tile *action_tgt_tile(struct unit *actor,
                              struct tile *target_tile,
                              const struct extra_type *target_extra,
@@ -57,17 +62,22 @@ struct extra_type *action_tgt_tile_extra(const struct unit *actor,
                                          const struct tile *target_tile,
                                          bool accept_all_actions);
 
+int action_sub_target_id_for_action(const struct action *paction,
+                                    struct unit *actor_unit);
+
 const struct action_auto_perf *
 action_auto_perf_unit_sel(const enum action_auto_perf_cause cause,
                           const struct unit *actor,
                           const struct player *other_player,
-                          const struct output_type *output);
+                          const struct output_type *eval_output,
+                          const struct action *eval_action);
 
 const struct action *
 action_auto_perf_unit_do(const enum action_auto_perf_cause cause,
                          struct unit *actor,
                          const struct player *other_player,
-                         const struct output_type *output,
+                         const struct output_type *eval_output,
+                         const struct action *eval_action,
                          const struct tile *target_tile,
                          const struct city *target_city,
                          const struct unit *target_unit,
@@ -77,7 +87,8 @@ struct act_prob
 action_auto_perf_unit_prob(const enum action_auto_perf_cause cause,
                            struct unit *actor,
                            const struct player *other_player,
-                           const struct output_type *output,
+                           const struct output_type *eval_output,
+                           const struct action *eval_action,
                            const struct tile *target_tile,
                            const struct city *target_city,
                            const struct unit *target_unit,

@@ -27,8 +27,9 @@
 /* client */
 #include "client_main.h"
 #include "dialogs_g.h"
+#include "mapview_common.h"
 
-/* client/gui-gtk3.22 */
+/* client/gui-gtk-3.22 */
 #include "gui_main.h"
 #include "gui_stuff.h"
 
@@ -61,6 +62,8 @@ static void infra_response_callback(GtkWidget *dlg, gint arg)
   instruction_label = NULL;
   points_label = NULL;
   infra_rows = 0;
+
+  client_infratile_set(NULL);
 
   gtk_widget_destroy(dlg);
 }
@@ -137,7 +140,9 @@ void update_infra_dialog(void)
   if (infra_dialog_open()) {
     char buffer[100];
 
-    fc_snprintf(buffer, sizeof(buffer), _("%d infrapoints"),
+    fc_snprintf(buffer, sizeof(buffer),
+                PL_("%d infrapoint", "%d infrapoints",
+                    client.conn.playing->economic.infra_points),
                 client.conn.playing->economic.infra_points);
 
     gtk_label_set_text(GTK_LABEL(points_label), buffer);
@@ -164,6 +169,8 @@ void infra_placement_set_tile(struct tile *ptile)
   if (!client_map_is_known_and_seen(ptile, client.conn.playing, V_MAIN)) {
     return;
   }
+
+  client_infratile_set(ptile);
 
   extra_type_iterate(pextra) {
     if (player_can_place_extra(pextra, client.conn.playing, ptile)) {

@@ -26,6 +26,7 @@ AM_CPPFLAGS = \
 	-I$(srcdir)/savegame \
 	-I$(srcdir)/scripting \
 	-I$(top_srcdir)/dependencies/tinycthread \
+	$(LUA_CFLAGS) \
 	$(FCDB_MYSQL_CFLAGS) $(FCDB_POSTGRES_CFLAGS) $(FCDB_SQLITE3_CFLAGS)
 
 if MINGW
@@ -99,6 +100,8 @@ libfreeciv_srv_la_SOURCES = \
 		score.h		\
 		sernet.c	\
 		sernet.h	\
+		setcompat.c	\
+		setcompat.h	\
 		settings.c	\
 		settings.h	\
 		spacerace.c	\
@@ -107,6 +110,8 @@ libfreeciv_srv_la_SOURCES = \
 		srv_log.h	\
 		srv_main.c	\
 		srv_main.h	\
+		srv_signal.c	\
+		srv_signal.h	\
 		stdinhand.c	\
 		stdinhand.h	\
 		techtools.h	\
@@ -122,7 +127,7 @@ libfreeciv_srv_la_SOURCES = \
 # outside this directory (when building common) there's no point in
 # setting them to BUILT_SOURCES.
 
-da_libs = 
+da_libs =
 
 if AI_MOD_DEFAULT_NEEDED
 da_libs += $(top_builddir)/ai/default/libdefaultai.la
@@ -130,9 +135,6 @@ endif
 
 if AI_MOD_STATIC_CLASSIC
 da_libs += $(top_builddir)/ai/classic/libclassicai.la
-endif
-if AI_MOD_STATIC_THREADED
-da_libs += $(top_builddir)/ai/threaded/libthreadedai.la
 endif
 if AI_MOD_STATIC_TEX
 da_libs += $(top_builddir)/ai/tex/libtexai.la
@@ -178,11 +180,3 @@ freeciv_server_SOURCES = $(exe_sources)
 freeciv_server_LDFLAGS = $(exe_ldflags)
 freeciv_server_LDADD = $(exe_ldadd)
 endif
-
-desktopfiledir = @DESKTOPDIR@
-desktopfile_DATA = \
-	freeciv-server.desktop
-
-appdatafiledir = @APPDATADIR@
-appdatafile_DATA = \
-	freeciv-server.appdata.xml

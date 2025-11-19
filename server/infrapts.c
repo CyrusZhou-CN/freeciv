@@ -18,7 +18,7 @@
 #include "map.h"
 
 /* server */
-#include "hand_gen.h"
+#include <hand_gen.h>       /* <> so looked from the build directory first. */
 #include "maphand.h"
 #include "notify.h"
 #include "plrhand.h"
@@ -28,29 +28,36 @@
 ****************************************************************************/
 void handle_player_place_infra(struct player *pplayer, int tile, int extra)
 {
-  struct tile *ptile = index_to_tile(&(wld.map), tile);
-  struct extra_type *pextra = extra_by_number(extra);
+  struct tile *ptile;
+  struct extra_type *pextra;
+
+  if (!terrain_control.infrapoints) {
+    return;
+  }
+
+  ptile = index_to_tile(&(wld.map), tile);
+  pextra = extra_by_number(extra);
 
   if (ptile == NULL || pextra == NULL) {
     return;
   }
 
   if (!map_is_known_and_seen(ptile, pplayer, V_MAIN)) {
-    notify_player(pplayer, NULL, E_LOW_ON_FUNDS, ftc_server,
+    notify_player(pplayer, NULL, E_INFRAPOINTS, ftc_server,
                   _("Cannot place %s to unseen tile."),
                   extra_name_translation(pextra));
     return;
   }
 
   if (pplayer->economic.infra_points < pextra->infracost) {
-    notify_player(pplayer, NULL, E_LOW_ON_FUNDS, ftc_server,
+    notify_player(pplayer, NULL, E_INFRAPOINTS, ftc_server,
                   _("Cannot place %s for lack of infrapoints."),
                   extra_name_translation(pextra));
     return;
   }
 
   if (!player_can_place_extra(pextra, pplayer, ptile)) {
-    notify_player(pplayer, NULL, E_LOW_ON_FUNDS, ftc_server,
+    notify_player(pplayer, NULL, E_INFRAPOINTS, ftc_server,
                   _("Cannot place unbuildable %s."),
                   extra_name_translation(pextra));
     return;

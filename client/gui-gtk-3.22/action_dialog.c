@@ -42,6 +42,7 @@
 #include "gui_stuff.h"
 #include "mapview.h"
 #include "packhand.h"
+#include "text.h"
 
 /* client/gui-gtk-3.22 */
 #include "citydlg.h"
@@ -51,13 +52,12 @@
 #include "wldlg.h"
 
 /* Locations for non action enabler controlled buttons. */
-#define BUTTON_MOVE ACTION_COUNT
-#define BUTTON_NEW_UNIT_TGT BUTTON_MOVE + 1
-#define BUTTON_NEW_EXTRA_TGT BUTTON_MOVE + 2
-#define BUTTON_LOCATION BUTTON_MOVE + 3
-#define BUTTON_WAIT BUTTON_MOVE + 4
-#define BUTTON_CANCEL BUTTON_MOVE + 5
-#define BUTTON_COUNT BUTTON_MOVE + 6
+#define BUTTON_NEW_UNIT_TGT (ACTION_COUNT + 1)
+#define BUTTON_NEW_EXTRA_TGT (BUTTON_NEW_UNIT_TGT + 1)
+#define BUTTON_LOCATION (BUTTON_NEW_EXTRA_TGT + 1)
+#define BUTTON_WAIT (BUTTON_LOCATION + 1)
+#define BUTTON_CANCEL (BUTTON_WAIT + 1)
+#define BUTTON_COUNT (BUTTON_CANCEL + 1)
 
 #define BUTTON_NOT_THERE -1
 
@@ -76,7 +76,7 @@ static GtkWidget  *spy_tech_shell;
 
 static GtkWidget  *spy_sabotage_shell;
 
-/* A structure to hold parameters for actions inside the GUI in stead of
+/* A structure to hold parameters for actions inside the GUI instead of
  * storing the needed data in a global variable. */
 struct action_data {
   action_id act_id;
@@ -121,7 +121,7 @@ static struct action_data *act_data(action_id act_id,
 
 /**********************************************************************//**
   Move the queue of units that need user input forward unless the current
-  unit are going to need more input.
+  unit is going to need more input.
 **************************************************************************/
 static void diplomat_queue_handle_primary(void)
 {
@@ -167,12 +167,12 @@ static void diplomat_queue_handle_primary(void)
 }
 
 /**********************************************************************//**
-  Move the queue of diplomats that need user input forward since the
-  current diplomat got the extra input that was required.
+  Move the queue of units that need user input forward since the
+  current unit doesn't require the extra input any more.
 **************************************************************************/
 static void diplomat_queue_handle_secondary(void)
 {
-  /* Stop waiting. Move on to the next queued diplomat. */
+  /* Stop waiting. Move on to the next queued unit. */
   is_more_user_input_needed = FALSE;
   diplomat_queue_handle_primary();
 }
@@ -277,6 +277,7 @@ static void simple_action_callback(GtkWidget *w, gpointer data)
     break;
   case ATK_UNITS:
   case ATK_TILE:
+  case ATK_EXTRAS:
     target_id = args->target_tile_id;
     if (NULL == index_to_tile(&(wld.map), target_id)) {
       /* TODO: Should this be possible at all? If not: add assertion. */
@@ -292,7 +293,7 @@ static void simple_action_callback(GtkWidget *w, gpointer data)
   }
 
   /* Sub target. */
-  sub_target = IDENTITY_NUMBER_ZERO;
+  sub_target = NO_TARGET;
   if (paction->target_complexity != ACT_TGT_COMPL_SIMPLE) {
     switch (action_get_sub_target_kind(paction)) {
     case ASTK_BUILDING:
@@ -383,6 +384,7 @@ static void request_action_details_callback(GtkWidget *w, gpointer data)
     break;
   case ATK_UNITS:
   case ATK_TILE:
+  case ATK_EXTRAS:
     target_id = args->target_tile_id;
     if (NULL == index_to_tile(&(wld.map), target_id)) {
       /* TODO: Should this be possible at all? If not: add assertion. */
@@ -448,25 +450,6 @@ static void upgrade_callback(GtkWidget *w, gpointer data)
 
   gtk_widget_destroy(act_sel_dialog);
   free(args);
-}
-
-/**********************************************************************//**
-  Returns a string with how many shields remains of the current production.
-  This is useful as custom information on the help build wonder button.
-**************************************************************************/
-static const gchar *city_prod_remaining(struct city* destcity)
-{
-  if (destcity == NULL
-      || city_owner(destcity) != client.conn.playing) {
-    /* Can't give remaining production for a foreign or non existing
-     * city. */
-    return NULL;
-  }
-
-  return g_strdup_printf(_("%d remaining"),
-                         impr_build_shield_cost(destcity,
-                                                destcity->production.value.building)
-                         - destcity->shield_stock);
 }
 
 /**********************************************************************//**
@@ -1049,14 +1032,14 @@ static void tgt_unit_change_callback(GtkWidget *dlg, gint arg)
                                       IDENTITY_NUMBER_ZERO,
                                       tgt_tile->index,
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       } else {
         dsend_packet_unit_get_actions(&client.conn,
                                       actor->id,
                                       tgt_id,
                                       tgt_tile->index,
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       }
     }
   } else {
@@ -1120,14 +1103,14 @@ static void tgt_extra_change_callback(GtkWidget *dlg, gint arg)
                                       /* Let the server choose the target
                                        * extra. */
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       } else {
         dsend_packet_unit_get_actions(&client.conn,
                                       actor->id,
                                       action_selection_target_unit(),
                                       tgt_tile->index,
                                       tgt_id,
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       }
     }
   } else {
@@ -1160,22 +1143,14 @@ static void act_sel_new_extra_tgt_callback(GtkWidget *w, gpointer data)
     extra_type_re_active_iterate(pextra) {
       if (BV_ISSET(potential_targets, extra_number(pextra))) {
         /* This extra is at the tile. Can anything be done to it? */
-        if (!(is_extra_removed_by(pextra, ERM_PILLAGE)
-              && unit_can_do_action(act_unit, ACTION_PILLAGE))) {
-          /* TODO: add more extra removal actions as they appear. */
+        if (!utype_can_remove_extra(unit_type_get(act_unit),
+                                    pextra)) {
           BV_CLR(potential_targets, extra_number(pextra));
         }
       } else {
         /* This extra isn't at the tile yet. Can it be created? */
-        if (pextra->buildable
-            && ((is_extra_caused_by(pextra, EC_IRRIGATION)
-                 && unit_can_do_action(act_unit, ACTION_IRRIGATE))
-                || (is_extra_caused_by(pextra, EC_MINE)
-                    && unit_can_do_action(act_unit, ACTION_MINE))
-                || (is_extra_caused_by(pextra, EC_BASE)
-                    && unit_can_do_action(act_unit, ACTION_BASE))
-                || (is_extra_caused_by(pextra, EC_ROAD)
-                    && unit_can_do_action(act_unit, ACTION_ROAD)))) {
+        if (utype_can_create_extra(unit_type_get(act_unit),
+                                   pextra)) {
           BV_SET(potential_targets, extra_number(pextra));
         }
       }
@@ -1213,28 +1188,6 @@ static void act_sel_location_callback(GtkWidget *w, gpointer data)
   if ((punit = game_unit_by_number(args->actor_unit_id))) {
     center_tile_mapcanvas(unit_tile(punit));
   }
-}
-
-/**********************************************************************//**
-  Callback from action selection dialog for "keep moving".
-  (This should only occur when entering a tile that has an allied city or
-  an allied unit.)
-**************************************************************************/
-static void act_sel_keep_moving_callback(GtkWidget *w, gpointer data)
-{
-  struct action_data *args = act_sel_dialog_data;
-
-  struct unit *punit;
-  struct tile *ptile;
-
-  if ((punit = game_unit_by_number(args->actor_unit_id))
-      && (ptile = index_to_tile(&(wld.map), args->target_tile_id))
-      && !same_pos(unit_tile(punit), ptile)) {
-    request_unit_non_action_move(punit, ptile);
-  }
-
-  gtk_widget_destroy(act_sel_dialog);
-  free(args);
 }
 
 /**********************************************************************//**
@@ -1316,7 +1269,7 @@ static const GCallback af_map[ACTION_COUNT] = {
 static void action_entry(GtkWidget *shl,
                          action_id act_id,
                          const struct act_prob *act_probs,
-                         const gchar *custom,
+                         const char *custom,
                          action_id act_num)
 {
   const gchar *label;
@@ -1340,8 +1293,8 @@ static void action_entry(GtkWidget *shl,
                                  act_probs[act_id],
                                  custom);
 
-  tooltip = action_get_tool_tip(act_id,
-                                act_probs[act_id]);
+  tooltip = act_sel_action_tool_tip(action_by_number(act_id),
+                                    act_probs[act_id]);
 
   action_button_map[act_id] = choice_dialog_get_number_of_buttons(shl);
   choice_dialog_add(shl, label, cb, GINT_TO_POINTER(act_num),
@@ -1354,7 +1307,7 @@ static void action_entry(GtkWidget *shl,
 static void action_entry_update(GtkWidget *shl,
                                 action_id act_id,
                                 const struct act_prob *act_probs,
-                                const gchar *custom,
+                                const char *custom,
                                 action_id act_num)
 {
   const gchar *label;
@@ -1370,8 +1323,8 @@ static void action_entry_update(GtkWidget *shl,
   label = action_prepare_ui_name(act_id, "_",
                                  act_probs[act_id], custom);
 
-  tooltip = action_get_tool_tip(act_id,
-                                act_probs[act_id]);
+  tooltip = act_sel_action_tool_tip(action_by_number(act_id),
+                                    act_probs[act_id]);
 
   choice_dialog_button_set_label(act_sel_dialog,
                                  action_button_map[act_id],
@@ -1437,6 +1390,9 @@ void popup_action_selection(struct unit *actor_unit,
   target_ids[ATK_TILE] = target_tile ?
                          tile_index(target_tile) :
                          TILE_INDEX_NONE;
+  target_ids[ATK_EXTRAS] = target_tile ?
+                           tile_index(target_tile) :
+                           TILE_INDEX_NONE;
   target_extra_id      = target_extra ?
                          extra_number(target_extra) :
                          EXTRA_NONE;
@@ -1482,8 +1438,10 @@ void popup_action_selection(struct unit *actor_unit,
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_CITY) {
       action_entry(shl, act, act_probs,
-                   act == ACTION_HELP_WONDER ?
-                     city_prod_remaining(target_city) : NULL,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
                    act);
     }
   } action_iterate_end;
@@ -1493,7 +1451,12 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_UNIT) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1502,7 +1465,12 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_UNITS) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1511,7 +1479,26 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_TILE) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
+    }
+  } action_iterate_end;
+
+  /* Unit acting against a tile's extras */
+
+  action_iterate(act) {
+    if (action_id_get_actor_kind(act) == AAK_UNIT
+        && action_id_get_target_kind(act) == ATK_EXTRAS) {
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1520,18 +1507,14 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_SELF) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
-
-  if (unit_can_move_to_tile(&(wld.map), actor_unit, target_tile,
-                            FALSE, FALSE)) {
-    action_button_map[BUTTON_MOVE] =
-        choice_dialog_get_number_of_buttons(shl);
-    choice_dialog_add(shl, _("_Keep moving"),
-                      (GCallback)act_sel_keep_moving_callback,
-                      GINT_TO_POINTER(ACTION_NONE), FALSE, NULL);
-  }
 
   if (target_unit != NULL
       && unit_list_size(target_tile->units) > 1) {
@@ -1702,20 +1685,17 @@ void action_selection_refresh(struct unit *actor_unit,
   }
 
   action_iterate(act) {
-    const gchar *custom;
+    const char *custom;
 
     if (action_id_get_actor_kind(act) != AAK_UNIT) {
       /* Not relevant. */
       continue;
     }
 
-    if (action_prob_possible(act_probs[act])
-        && act == ACTION_HELP_WONDER) {
-      /* Add information about how far along the wonder is. */
-      custom = city_prod_remaining(target_city);
-    } else {
-      custom = NULL;
-    }
+    custom = get_act_sel_action_custom_text(action_by_number(act),
+                                            act_probs[act],
+                                            actor_unit,
+                                            target_city);
 
     if (BUTTON_NOT_THERE == action_button_map[act]) {
       /* Add the button (unless its probability is 0). */

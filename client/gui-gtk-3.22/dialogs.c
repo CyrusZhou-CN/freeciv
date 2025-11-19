@@ -38,6 +38,7 @@
 #include "map.h"
 #include "packets.h"
 #include "player.h"
+#include "sex.h"
 
 /* client */
 #include "client_main.h"
@@ -1077,13 +1078,15 @@ static void create_races_dialog(struct player *pplayer)
   gtk_grid_attach(GTK_GRID(table), label, 0, 0, 1, 2);
   gtk_grid_attach(GTK_GRID(table), combo, 1, 0, 2, 1);
 
-  cmd = gtk_radio_button_new_with_mnemonic(NULL, _("_Female"));
+  cmd = gtk_radio_button_new_with_mnemonic(NULL,
+                                           sex_name_mnemonic(SEX_FEMALE, "_"));
   gtk_widget_set_margin_bottom(cmd, 6);
   races_sex[0] = cmd;
   gtk_grid_attach(GTK_GRID(table), cmd, 1, 1, 1, 1);
 
   cmd = gtk_radio_button_new_with_mnemonic_from_widget(GTK_RADIO_BUTTON(cmd),
-      _("_Male"));
+                                                       sex_name_mnemonic(SEX_MALE,
+                                                                         "_"));
   gtk_widget_set_margin_bottom(cmd, 6);
   races_sex[1] = cmd;
   gtk_grid_attach(GTK_GRID(table), cmd, 2, 1, 1, 1);
@@ -1176,9 +1179,9 @@ static void create_races_dialog(struct player *pplayer)
       G_CALLBACK(races_leader_callback), NULL);
 
   g_signal_connect(races_sex[0], "toggled",
-      G_CALLBACK(races_sex_callback), GINT_TO_POINTER(0));
+      G_CALLBACK(races_sex_callback), GINT_TO_POINTER(SEX_FEMALE));
   g_signal_connect(races_sex[1], "toggled",
-      G_CALLBACK(races_sex_callback), GINT_TO_POINTER(1));
+      G_CALLBACK(races_sex_callback), GINT_TO_POINTER(SEX_MALE));
 
   /* Finish up. */
   gtk_dialog_set_default_response(GTK_DIALOG(shell), GTK_RESPONSE_CANCEL);
@@ -1533,15 +1536,25 @@ void show_tech_gained_dialog(Tech_type_id tech)
   Show tileset error dialog. It's blocking as client will
   shutdown as soon as this function returns.
 **************************************************************************/
-void show_tileset_error(const char *msg)
+void show_tileset_error(const char *tset_name, const char *msg)
 {
   if (is_gui_up()) {
     GtkWidget *dialog;
 
-    dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
-                                    GTK_BUTTONS_CLOSE,
-                                    _("Tileset problem, it's probably incompatible with the ruleset:\n%s"),
-                                    msg);
+    if (tset_name != NULL) {
+      dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
+                                      GTK_BUTTONS_CLOSE,
+                                      _("Tileset \"%s\" problem, "
+                                        "it's probably incompatible with the ruleset:\n%s"),
+                                      tset_name, msg);
+    } else {
+      dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
+                                      GTK_BUTTONS_CLOSE,
+                                      _("Tileset problem, "
+                                        "it's probably incompatible with the ruleset:\n%s"),
+                                      msg);
+    }
+
     setup_dialog(dialog, toplevel);
 
     gtk_dialog_run(GTK_DIALOG(dialog));
@@ -1568,4 +1581,48 @@ void popup_combat_info(int attacker_unit_id, int defender_unit_id,
                        int attacker_hp, int defender_hp,
                        bool make_att_veteran, bool make_def_veteran)
 {
+}
+
+/**********************************************************************//**
+  This is the response callback for the action confirmation dialog.
+**************************************************************************/
+static void act_conf_response(GtkWidget *dialog, gint response,
+                              gpointer data)
+{
+  gtk_widget_destroy(dialog);
+
+  if (response == GTK_RESPONSE_YES) {
+    action_confirmation(data, TRUE);
+  } else {
+    action_confirmation(data, FALSE);
+  }
+}
+
+/**********************************************************************//**
+  Common code wants confirmation for an action.
+**************************************************************************/
+void request_action_confirmation(const char *expl,
+                                 struct act_confirmation_data *data)
+{
+  GtkWidget *dialog;
+  char buf[1024];
+
+  if (expl != NULL) {
+    fc_snprintf(buf, sizeof(buf), _("Are you sure you want to do %s?\n%s"),
+                action_id_name_translation(data->act), expl);
+  } else {
+    fc_snprintf(buf, sizeof(buf), _("Are you sure you want to do %s?"),
+                action_id_name_translation(data->act));
+  }
+
+  dialog = gtk_message_dialog_new(NULL, 0,
+                                  GTK_MESSAGE_WARNING,
+                                  GTK_BUTTONS_YES_NO,
+                                  "%s", buf);
+  setup_dialog(dialog, toplevel);
+
+  g_signal_connect(dialog, "response",
+                   G_CALLBACK(act_conf_response), data);
+
+  gtk_window_present(GTK_WINDOW(dialog));
 }

@@ -36,11 +36,13 @@
 
 #include "modinst.h"
 
+static GtkWidget *toplevel;
 static GtkWidget *statusbar;
 static GtkWidget *progressbar;
 static GtkWidget *main_list;
 static GtkListStore *main_store;
 static GtkWidget *URL_input;
+static GtkWidget *quit_dialog;
 static gboolean downloading = FALSE;
 
 struct fcmp_params fcmp = {
@@ -48,6 +50,8 @@ struct fcmp_params fcmp = {
   .inst_prefix = NULL,
   .autoinstall = NULL
 };
+
+static GtkApplication *fcmp_app;
 
 static gboolean quit_dialog_callback(void);
 
@@ -70,12 +74,7 @@ static gboolean quit_dialog_callback(void);
 **************************************************************************/
 static void modinst_quit(void)
 {
-  close_mpdbs();
-
-  fcmp_deinit();
-  cmdline_option_values_free();
-
-  exit(EXIT_SUCCESS);
+  g_application_quit(G_APPLICATION(fcmp_app));
 }
 
 /**********************************************************************//**
@@ -84,10 +83,18 @@ static void modinst_quit(void)
 **************************************************************************/
 static void quit_dialog_response(GtkWidget *dialog, gint response)
 {
-  gtk_widget_destroy(dialog);
+  gtk_window_destroy(GTK_WINDOW(dialog));
   if (response == GTK_RESPONSE_YES) {
     modinst_quit();
   }
+}
+
+/**********************************************************************//**
+  Quit dialog has been destroyed
+**************************************************************************/
+static void quit_dialog_destroyed(GtkWidget *dialog, void *data)
+{
+  quit_dialog = NULL;
 }
 
 /**********************************************************************//**
@@ -97,27 +104,27 @@ static gboolean quit_dialog_callback(void)
 {
   if (downloading) {
     /* Download in progress. Confirm quit from user. */
-    static GtkWidget *dialog;
 
-    if (!dialog) {
-      dialog = gtk_message_dialog_new(NULL,
-                                      0,
-                                      GTK_MESSAGE_WARNING,
-                                      GTK_BUTTONS_YES_NO,
+    if (quit_dialog == NULL) {
+      quit_dialog = gtk_message_dialog_new(NULL,
+                                           0,
+                                           GTK_MESSAGE_WARNING,
+                                           GTK_BUTTONS_YES_NO,
       _("Modpack installation in progress.\nAre you sure you want to quit?"));
 
-      gtk_window_set_position(GTK_WINDOW(dialog), GTK_WIN_POS_MOUSE);
+      gtk_window_set_transient_for(GTK_WINDOW(quit_dialog),
+                                   GTK_WINDOW(toplevel));
 
-      g_signal_connect(dialog, "response", 
+      g_signal_connect(quit_dialog, "response",
                        G_CALLBACK(quit_dialog_response), NULL);
-      g_signal_connect(dialog, "destroy",
-                       G_CALLBACK(gtk_widget_destroyed), &dialog);
+      g_signal_connect(quit_dialog, "destroy",
+                       G_CALLBACK(quit_dialog_destroyed), NULL);
     }
 
-    gtk_window_present(GTK_WINDOW(dialog));
+    gtk_window_present(GTK_WINDOW(quit_dialog));
 
   } else {
-    /* User loses no work by quitting, so let's not annoy him/her
+    /* User loses no work by quitting, so let's not annoy them
      * with confirmation dialog. */
     modinst_quit();
   }
@@ -346,7 +353,7 @@ static gboolean query_main_list_tooltip_cb(GtkWidget *widget,
   GtkTreeModel *model;
   const char *notes;
 
-  if (!gtk_tree_view_get_tooltip_context(tree_view, &x, &y,
+  if (!gtk_tree_view_get_tooltip_context(tree_view, x, y,
                                          keyboard_tip,
                                          &model, NULL, &iter)) {
     return FALSE;
@@ -434,11 +441,11 @@ static void select_from_list(GtkTreeSelection *select, gpointer data)
 /**********************************************************************//**
   Build widgets
 **************************************************************************/
-static void modinst_setup_widgets(GtkWidget *toplevel)
+static void modinst_setup_widgets(void)
 {
   GtkWidget *mbox, *Ubox;
   GtkWidget *version_label;
-  GtkWidget *install_button, *install_label;
+  GtkWidget *install_button;
   GtkWidget *URL_label;
   GtkCellRenderer *renderer;
   GtkTreeSelection *selection;
@@ -505,10 +512,7 @@ static void modinst_setup_widgets(GtkWidget *toplevel)
   g_signal_connect(selection, "changed", G_CALLBACK(select_from_list), NULL);
 
   install_button = gtk_button_new();
-  install_label = gtk_label_new(_("Install modpack"));
-  gtk_label_set_mnemonic_widget(GTK_LABEL(install_label), install_button);
-  g_object_set_data(G_OBJECT(install_button), "label", install_label);
-  gtk_container_add(GTK_CONTAINER(install_button), install_label);
+  gtk_button_set_label(GTK_BUTTON(install_button), _("Install modpack"));
 
   Ubox = gtk_grid_new();
   gtk_widget_set_halign(Ubox, GTK_ALIGN_CENTER);
@@ -524,8 +528,8 @@ static void modinst_setup_widgets(GtkWidget *toplevel)
   g_signal_connect(install_button, "clicked",
                    G_CALLBACK(install_clicked), URL_input);
 
-  gtk_container_add(GTK_CONTAINER(Ubox), URL_label);
-  gtk_container_add(GTK_CONTAINER(Ubox), URL_input);
+  gtk_grid_attach(GTK_GRID(Ubox), URL_label, 0, 0, 1, 1);
+  gtk_grid_attach(GTK_GRID(Ubox), URL_input, 0, 1, 1, 1);
 
   progressbar = gtk_progress_bar_new();
 
@@ -534,14 +538,14 @@ static void modinst_setup_widgets(GtkWidget *toplevel)
   gtk_widget_set_hexpand(main_list, TRUE);
   gtk_widget_set_vexpand(main_list, TRUE);
 
-  gtk_container_add(GTK_CONTAINER(mbox), version_label);
-  gtk_container_add(GTK_CONTAINER(mbox), main_list);
-  gtk_container_add(GTK_CONTAINER(mbox), Ubox);
-  gtk_container_add(GTK_CONTAINER(mbox), install_button);
-  gtk_container_add(GTK_CONTAINER(mbox), progressbar);
-  gtk_container_add(GTK_CONTAINER(mbox), statusbar);
+  gtk_grid_attach(GTK_GRID(mbox), version_label, 0, 0, 1, 1);
+  gtk_grid_attach(GTK_GRID(mbox), main_list, 0, 1, 1, 1);
+  gtk_grid_attach(GTK_GRID(mbox), Ubox, 0, 2, 1, 1);
+  gtk_grid_attach(GTK_GRID(mbox), install_button, 0, 3, 1, 1);
+  gtk_grid_attach(GTK_GRID(mbox), progressbar, 0, 4, 1, 1);
+  gtk_grid_attach(GTK_GRID(mbox), statusbar, 0, 5, 1, 1);
 
-  gtk_container_add(GTK_CONTAINER(toplevel), mbox);
+  gtk_window_set_child(GTK_WINDOW(toplevel), mbox);
 
   main_store = gtk_list_store_new((ML_STORE_SIZE), G_TYPE_STRING, G_TYPE_STRING,
                                   G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
@@ -562,11 +566,50 @@ static void modinst_setup_widgets(GtkWidget *toplevel)
 }
 
 /**********************************************************************//**
+  Run the gui
+**************************************************************************/
+static void activate_gui(GtkApplication *app, gpointer data)
+{
+  quit_dialog = NULL;
+
+  toplevel = gtk_application_window_new(app);
+
+  gtk_widget_realize(toplevel);
+  gtk_widget_set_name(toplevel, "Freeciv-modpack");
+  gtk_window_set_title(GTK_WINDOW(toplevel),
+                       _("Freeciv modpack installer (gtk4)"));
+
+#if 0
+    /* Keep the icon of the executable on Windows */
+#ifndef FREECIV_MSWINDOWS
+  {
+    /* Unlike main client, this only works if installed. Ignore any
+     * errors loading the icon. */
+    GError *err;
+
+    (void) gtk_window_set_icon_from_file(GTK_WINDOW(toplevel), MPICON_PATH,
+                                         &err);
+  }
+#endif /* FREECIV_MSWINDOWS */
+#endif /* 0 */
+
+  g_signal_connect(toplevel, "close_request",
+                   G_CALLBACK(quit_dialog_callback), NULL);
+
+  modinst_setup_widgets();
+
+  gtk_widget_show(toplevel);
+
+  if (fcmp.autoinstall != NULL) {
+    gui_download_modpack(fcmp.autoinstall);
+  }
+}
+
+/**********************************************************************//**
   Entry point of the freeciv-modpack program
 **************************************************************************/
 int main(int argc, char *argv[])
 {
-  GtkWidget *toplevel;
   int ui_options;
 
   fcmp_init();
@@ -579,10 +622,6 @@ int main(int argc, char *argv[])
 
     for (i = 1; i <= ui_options; i++) {
       if (is_option("--help", argv[i])) {
-        fc_fprintf(stderr,
-             _("This modpack installer accepts the standard Gtk command-line options\n"
-               "after '--'. See the Gtk documentation.\n\n"));
-
         /* TRANS: No full stop after the URL, could cause confusion. */
         fc_fprintf(stderr, _("Report bugs at %s\n"), BUG_URL);
 
@@ -592,44 +631,17 @@ int main(int argc, char *argv[])
   }
 
   if (ui_options != -1) {
-
     load_install_info_lists(&fcmp);
 
-    gtk_init();
+    if (gtk_init_check()) {
+      fcmp_app = gtk_application_new(NULL, 0);
+      g_signal_connect(fcmp_app, "activate", G_CALLBACK(activate_gui), NULL);
+      g_application_run(G_APPLICATION(fcmp_app), 0, NULL);
 
-    toplevel = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-
-    gtk_widget_realize(toplevel);
-    gtk_widget_set_name(toplevel, "Freeciv-modpack");
-    gtk_window_set_title(GTK_WINDOW(toplevel),
-                         _("Freeciv modpack installer (gtk3x)"));
-
-#if 0
-    /* Keep the icon of the executable on Windows */
-#ifndef FREECIV_MSWINDOWS
-    {
-      /* Unlike main client, this only works if installed. Ignore any
-       * errors loading the icon. */
-      GError *err;
-
-      (void) gtk_window_set_icon_from_file(GTK_WINDOW(toplevel), MPICON_PATH,
-                                           &err);
+      g_object_unref(fcmp_app);
+    } else {
+      log_fatal(_("Failed to open graphical mode."));
     }
-#endif /* FREECIV_MSWINDOWS */
-#endif /* 0 */
-
-    g_signal_connect(toplevel, "delete_event",
-                     G_CALLBACK(quit_dialog_callback), NULL);
-
-    modinst_setup_widgets(toplevel);
-
-    gtk_widget_show(toplevel);
-
-    if (fcmp.autoinstall != NULL) {
-      gui_download_modpack(fcmp.autoinstall);
-    }
-
-    gtk_main();
 
     close_mpdbs();
   }

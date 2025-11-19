@@ -373,12 +373,16 @@ bool can_build_extra_base(const struct extra_type *pextra,
                           const struct player *pplayer,
                           const struct tile *ptile)
 {
+  struct terrain *pterr;
+
   if (!extra_can_be_built(pextra, ptile)) {
     return FALSE;
   }
 
+  pterr = tile_terrain(ptile);
+
   if (is_extra_caused_by(pextra, EC_BASE)) {
-    if (tile_terrain(ptile)->base_time == 0) {
+    if (pterr->base_time == 0) {
       return FALSE;
     }
     if (tile_city(ptile) != NULL && extra_base_get(pextra)->border_sq >= 0) {
@@ -386,8 +390,21 @@ bool can_build_extra_base(const struct extra_type *pextra,
     }
   }
 
+  /* Even if it's a multi-cause extra, just having Build Road as one of the
+   * causes makes it to require that road_time != 0.
+   * Correct functioning of EC_PLACE extras depend on this. */
   if (is_extra_caused_by(pextra, EC_ROAD)
-      && tile_terrain(ptile)->road_time == 0) {
+      && pterr->road_time == 0) {
+    return FALSE;
+  }
+
+  if (is_extra_caused_by(pextra, EC_IRRIGATION)
+      && pterr->irrigation_time == 0) {
+    return FALSE;
+  }
+
+  if (is_extra_caused_by(pextra, EC_MINE)
+      && pterr->mining_time == 0) {
     return FALSE;
   }
 
@@ -415,8 +432,12 @@ bool player_can_build_extra(const struct extra_type *pextra,
     return FALSE;
   }
 
-  return are_reqs_active(pplayer, tile_owner(ptile), NULL, NULL, ptile,
-                         NULL, NULL, NULL, NULL, NULL, &pextra->reqs,
+  return are_reqs_active(&(const struct req_context) {
+                           .player = pplayer,
+                           .tile = ptile,
+                         },
+                         tile_owner(ptile),
+                         &pextra->reqs,
                          RPT_POSSIBLE);
 }
 
@@ -478,8 +499,14 @@ bool can_build_extra(const struct extra_type *pextra,
     return FALSE;
   }
 
-  return are_reqs_active(pplayer, tile_owner(ptile), NULL, NULL, ptile,
-                         punit, unit_type_get(punit), NULL, NULL, NULL, &pextra->reqs,
+  return are_reqs_active(&(const struct req_context) {
+                           .player = pplayer,
+                           .tile = ptile,
+                           .unit = punit,
+                           .unittype = unit_type_get(punit),
+                         },
+                         tile_owner(ptile),
+                         &pextra->reqs,
                          RPT_CERTAIN);
 }
 
@@ -518,6 +545,7 @@ static bool can_extra_be_removed(const struct extra_type *pextra,
 
 /************************************************************************//**
   Tells if player can remove extra from tile with suitable unit.
+  Entering or Frightening huts are not considered.
 ****************************************************************************/
 bool player_can_remove_extra(const struct extra_type *pextra,
                              const struct player *pplayer,
@@ -527,9 +555,12 @@ bool player_can_remove_extra(const struct extra_type *pextra,
     return FALSE;
   }
 
-  /* For huts, it's not checked if player has any non-HUT_NOTHING units */
-  return are_reqs_active(pplayer, tile_owner(ptile), NULL, NULL, ptile,
-                         NULL, NULL, NULL, NULL, NULL, &pextra->rmreqs,
+  return are_reqs_active(&(const struct req_context) {
+                           .player = pplayer,
+                           .tile = ptile,
+                         },
+                         tile_owner(ptile),
+                         &pextra->rmreqs,
                          RPT_POSSIBLE);
 }
 
@@ -537,18 +568,22 @@ bool player_can_remove_extra(const struct extra_type *pextra,
   Tells if unit can remove extra from tile.
   Does not examine action requirements if an action is required for it.
 ****************************************************************************/
-bool can_remove_extra(struct extra_type *pextra,
+bool can_remove_extra(const struct extra_type *pextra,
                       const struct unit *punit,
                       const struct tile *ptile)
 {
-
   if (!can_extra_be_removed(pextra, ptile)) {
     return FALSE;
   }
 
-  return are_reqs_active(unit_owner(punit), tile_owner(ptile), NULL, NULL,
-                         ptile, punit, unit_type_get(punit), NULL, NULL,
-                         NULL, &pextra->rmreqs, RPT_CERTAIN);
+  return are_reqs_active(&(const struct req_context) {
+                           .player = unit_owner(punit),
+                           .tile = ptile,
+                           .unit = punit,
+                           .unittype = unit_type_get(punit),
+                         },
+                         tile_owner(ptile),
+                         &pextra->rmreqs, RPT_CERTAIN);
 }
 
 /************************************************************************//**
@@ -564,12 +599,12 @@ bool is_native_tile_to_extra(const struct extra_type *pextra,
   }
 
   if (is_extra_caused_by(pextra, EC_IRRIGATION)
-      && pterr->irrigation_result != pterr) {
+      && pterr->irrigation_time == 0) {
     return FALSE;
   }
 
   if (is_extra_caused_by(pextra, EC_MINE)
-      && pterr->mining_result != pterr) {
+      && pterr->mining_time == 0) {
     return FALSE;
   }
 
@@ -594,9 +629,8 @@ bool is_native_tile_to_extra(const struct extra_type *pextra,
     }
   }
 
-  return are_reqs_active(NULL, NULL, NULL, NULL, ptile,
-                         NULL, NULL, NULL, NULL, NULL,
-                         &pextra->reqs, RPT_POSSIBLE);
+  return are_reqs_active(&(const struct req_context) { .tile = ptile },
+                         NULL, &pextra->reqs, RPT_POSSIBLE);
 }
 
 /************************************************************************//**
@@ -637,14 +671,19 @@ bool hut_on_tile(const struct tile *ptile)
 bool unit_can_enter_hut(const struct unit *punit,
                         const struct tile *ptile)
 {
-  if (HUT_NORMAL != unit_class_get(punit)->hut_behavior) {
+  const struct req_context context = {
+    .player = unit_owner(punit),
+    .tile = ptile,
+  };
+
+  if (!(unit_can_do_action_result(punit, ACTRES_HUT_ENTER)
+        || unit_can_do_action_sub_result(punit, ACT_SUB_RES_HUT_ENTER))) {
     return FALSE;
   }
   extra_type_by_rmcause_iterate(ERM_ENTER, extra) {
     if (tile_has_extra(ptile, extra)
-    && are_reqs_active(unit_owner(punit), tile_owner(ptile), NULL, NULL,
-                       ptile, NULL, NULL, NULL, NULL, NULL, &extra->rmreqs,
-                       RPT_POSSIBLE)){
+        && are_reqs_active(&context, tile_owner(ptile), &extra->rmreqs,
+                           RPT_POSSIBLE)) {
       return TRUE;
     }
   } extra_type_by_rmcause_iterate_end;
@@ -658,14 +697,21 @@ bool unit_can_enter_hut(const struct unit *punit,
 bool unit_can_displace_hut(const struct unit *punit,
                            const struct tile *ptile)
 {
-  if (HUT_NOTHING == unit_class_get(punit)->hut_behavior) {
+  const struct req_context context = {
+    .player = unit_owner(punit),
+    .tile = ptile,
+  };
+
+  if (!(unit_can_do_action_result(punit, ACTRES_HUT_FRIGHTEN)
+        || unit_can_do_action_sub_result(punit, ACT_SUB_RES_HUT_FRIGHTEN)
+        || unit_can_do_action_result(punit, ACTRES_HUT_ENTER)
+        || unit_can_do_action_sub_result(punit, ACT_SUB_RES_HUT_ENTER))) {
     return FALSE;
   }
   extra_type_by_rmcause_iterate(ERM_ENTER, extra) {
     if (tile_has_extra(ptile, extra)
-    && are_reqs_active(unit_owner(punit), tile_owner(ptile), NULL, NULL,
-                       ptile, NULL, NULL, NULL, NULL, NULL, &extra->rmreqs,
-                       RPT_POSSIBLE)){
+        && are_reqs_active(&context, tile_owner(ptile), &extra->rmreqs,
+                           RPT_POSSIBLE)) {
       return TRUE;
     }
   } extra_type_by_rmcause_iterate_end;
@@ -679,23 +725,6 @@ struct extra_type *next_extra_for_tile(const struct tile *ptile, enum extra_caus
                                        const struct player *pplayer,
                                        const struct unit *punit)
 {
-  if (cause == EC_IRRIGATION) {
-    struct terrain *pterrain = tile_terrain(ptile);
-
-    if (pterrain->irrigation_result != pterrain) {
-      /* No extra can be created by irrigation the tile */
-      return NULL;
-    }
-  }
-  if (cause == EC_MINE) {
-    struct terrain *pterrain = tile_terrain(ptile);
-
-    if (pterrain->mining_result != pterrain) {
-      /* No extra can be created by mining the tile */
-      return NULL;
-    }
-  }
-
   extra_type_by_cause_iterate(cause, pextra) {
     if (!tile_has_extra(ptile, pextra)) {
       if (punit != NULL) {
@@ -880,6 +909,25 @@ const char *extra_flag_helptxt(enum extra_flag_id id)
   return user_extra_flags[id - EF_USER_FLAG_1].helptxt;
 }
 
+/**********************************************************************//**
+  Returns TRUE iff the specified extra type flag is in use by any extra
+  type.
+  @param id the extra type flag to check if is in use.
+  @returns TRUE if the extra type flag is used in the current ruleset.
+**************************************************************************/
+bool extra_flag_is_in_use(enum extra_flag_id id)
+{
+  extra_type_re_active_iterate(pextra) {
+    if (extra_has_flag(pextra, id)) {
+      /* Found a user. */
+      return TRUE;
+    }
+  } extra_type_re_active_iterate_end;
+
+  /* No users detected. */
+  return FALSE;
+}
+
 /************************************************************************//**
   Can two extras coexist in same tile?
 ****************************************************************************/
@@ -938,8 +986,9 @@ bool is_extra_removed_by_worker_action(const struct extra_type *pextra)
   Is the extra caused by specific worker action?
 ****************************************************************************/
 bool is_extra_caused_by_action(const struct extra_type *pextra,
-                               enum unit_activity act)
+                               const struct action *paction)
 {
+  enum unit_activity act = action_get_activity(paction);
   return is_extra_caused_by(pextra, activity_to_extra_cause(act));
 }
 
@@ -947,8 +996,9 @@ bool is_extra_caused_by_action(const struct extra_type *pextra,
   Is the extra removed by specific worker action?
 ****************************************************************************/
 bool is_extra_removed_by_action(const struct extra_type *pextra,
-                                enum unit_activity act)
+                                const struct action *paction)
 {
+  enum unit_activity act = action_get_activity(paction);
   return is_extra_removed_by(pextra, activity_to_extra_rmcause(act));
 }
 
@@ -1009,8 +1059,8 @@ bool can_extra_appear(const struct extra_type *pextra, const struct tile *ptile)
     && is_extra_caused_by(pextra, EC_APPEARANCE)
     && is_native_tile_to_extra(pextra, ptile)
     && !extra_conflicting_on_tile(pextra, ptile)
-    && are_reqs_active(NULL, tile_owner(ptile), NULL, NULL, ptile,
-                       NULL, NULL, NULL, NULL, NULL,
+    && are_reqs_active(&(const struct req_context) { .tile = ptile },
+                       tile_owner(ptile),
                        &pextra->appearance_reqs, RPT_CERTAIN);
 }
 
@@ -1022,8 +1072,8 @@ bool can_extra_disappear(const struct extra_type *pextra, const struct tile *pti
   return tile_has_extra(ptile, pextra)
     && is_extra_removed_by(pextra, ERM_DISAPPEARANCE)
     && can_extra_be_removed(pextra, ptile)
-    && are_reqs_active(NULL, tile_owner(ptile), NULL, NULL, ptile,
-                       NULL, NULL, NULL, NULL, NULL,
+    && are_reqs_active(&(const struct req_context) { .tile = ptile },
+                       tile_owner(ptile),
                        &pextra->disappearance_reqs, RPT_CERTAIN);
 }
 

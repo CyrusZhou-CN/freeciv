@@ -30,6 +30,7 @@
 #include "government.h"
 #include "map.h"
 #include "movement.h"
+#include "nation.h"
 #include "packets.h"
 #include "player.h"
 #include "research.h"
@@ -37,6 +38,7 @@
 #include "unitlist.h"
 
 /* aicore */
+#include "aiactions.h"
 #include "pf_tools.h"
 
 /* server */
@@ -59,16 +61,15 @@
 #include "handicaps.h"
 
 /* ai/default */
-#include "aidata.h"
 #include "aiguard.h"
 #include "aihand.h"
-#include "ailog.h"
-#include "aiplayer.h"
 #include "aitools.h"
-#include "aiunit.h"
 #include "daiactions.h"
 #include "daicity.h"
+#include "daidata.h"
+#include "dailog.h"
 #include "daimilitary.h"
+#include "daiplayer.h"
 
 #include "aidiplomat.h"
 
@@ -145,12 +146,14 @@ void dai_choose_diplomat_defensive(struct ai_type *ait,
       if (ut) {
         struct ai_plr *plr_data = def_ai_player_data(pplayer, ait);
 
-        plr_data->tech_want[advance_index(ut->require_advance)]
-          += DIPLO_DEFENSE_WANT;
-        TECH_LOG(ait, LOG_DEBUG, pplayer, ut->require_advance,
-                 "ai_choose_diplomat_defensive() + %d for %s",
-                 DIPLO_DEFENSE_WANT,
-                 utype_rule_name(ut));
+        unit_tech_reqs_iterate(ut, padv) {
+          plr_data->tech_want[advance_index(padv)]
+            += DIPLO_DEFENSE_WANT;
+          TECH_LOG(ait, LOG_DEBUG, pplayer, padv,
+                   "ai_choose_diplomat_defensive() + %d for %s",
+                   DIPLO_DEFENSE_WANT,
+                   utype_rule_name(ut));
+        } unit_tech_reqs_iterate_end;
       }
     }
   }
@@ -187,7 +190,8 @@ void dai_choose_diplomat_offensive(struct ai_type *ait,
     struct pf_map *pfm;
     struct pf_parameter parameter;
     struct city *acity;
-    int want, loss, p_success, p_failure, time_to_dest;
+    adv_want want;
+    int loss, p_success, p_failure, time_to_dest;
     int gain_incite = 0, gain_theft = 0, gain = 1;
     int incite_cost;
     struct unit *punit = unit_virtual_create(
@@ -246,7 +250,7 @@ void dai_choose_diplomat_offensive(struct ai_type *ait,
                                          FALSE) * TRADE_WEIGHTING);
     }
     gain = MAX(gain_incite, gain_theft);
-    loss = utype_build_shield_cost(pcity, ut) * SHIELD_WEIGHTING;
+    loss = utype_build_shield_cost(pcity, NULL, ut) * SHIELD_WEIGHTING;
 
     /* Probability to succeed, assuming no defending diplomat */
     p_success = game.server.diplchance;
@@ -269,7 +273,7 @@ void dai_choose_diplomat_offensive(struct ai_type *ait,
     }
 
     want = military_amortize(pplayer, pcity, want, time_to_dest, 
-                             utype_build_shield_cost(pcity, ut));
+                             utype_build_shield_cost(pcity, NULL, ut));
 
     if (!player_has_embassy(pplayer, city_owner(acity))
         && want < 99
@@ -287,8 +291,9 @@ void dai_choose_diplomat_offensive(struct ai_type *ait,
     }
     if (want > choice->want) {
       log_base(LOG_DIPLOMAT_BUILD,
-               "%s, %s: %s is desired with want %d to spy in %s (incite "
-               "want %d cost %d gold %d, tech theft want %d, ttd %d)",
+               "%s, %s: %s is desired with want " ADV_WANT_PRINTF
+               " to spy in %s (incite want %d cost %d gold %d, "
+               "tech theft want %d, ttd %d)",
                player_name(pplayer),
                city_name_get(pcity),
                utype_rule_name(ut),
@@ -418,52 +423,7 @@ static bool is_city_surrounded_by_our_spies(struct player *pplayer,
     }
     unit_list_iterate(ptile->units, punit) {
       if (unit_owner(punit) == pplayer
-          && (utype_can_do_action(unit_type_get(punit),
-                                  ACTION_SPY_INVESTIGATE_CITY)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_INV_CITY_SPEND)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_POISON)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_POISON_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SPREAD_PLAGUE)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_STEAL_GOLD)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_STEAL_GOLD_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_CITY)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_CITY_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_TARGETED_SABOTAGE_CITY)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_CITY_PRODUCTION)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_CITY_PRODUCTION_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_STEAL_TECH)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_STEAL_TECH_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_TARGETED_STEAL_TECH)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_TARGETED_STEAL_TECH_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_INCITE_CITY)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_INCITE_CITY_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_ATTACK)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_BRIBE_UNIT)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_UNIT_ESC)
-              || utype_can_do_action(unit_type_get(punit),
-                                     ACTION_SPY_SABOTAGE_UNIT))) {
+          && aia_utype_is_considered_spy(unit_type_get(punit))) {
         return TRUE;
       }
     } unit_list_iterate_end;
@@ -636,9 +596,9 @@ static bool dai_diplomat_bribe_nearby(struct ai_type *ait,
     struct tile *ptile = pos.tile;
     bool threat = FALSE;
     int newval, bestval = 0, cost;
-    struct unit *pvictim = is_other_players_unit_tile(ptile, pplayer);
+    struct unit *pvictim = tile_other_players_unit(ptile, pplayer);
     int sanity = punit->id;
-    struct unit_type *ptype;
+    const struct unit_type *ptype;
 
     if (pos.total_MC > punit->moves_left) {
       /* Didn't find anything within range. */
@@ -657,7 +617,7 @@ static bool dai_diplomat_bribe_nearby(struct ai_type *ait,
     /* Calculate if enemy is a threat */
     /* First find best defender on our tile */
     unit_list_iterate(ptile->units, aunit) {
-      struct unit_type *atype = unit_type_get(aunit);
+      const struct unit_type *atype = unit_type_get(aunit);
 
       newval = DEFENSE_POWER(atype);
       if (bestval < newval) {
@@ -677,9 +637,9 @@ static bool dai_diplomat_bribe_nearby(struct ai_type *ait,
     }
 
     if (has_handicap(pplayer, H_NOBRIBE_WF)) {
-      /* Don't bribe settlers! */
-      if (unit_has_type_flag(pvictim, UTYF_SETTLERS)
-          || unit_can_do_action(pvictim, ACTION_FOUND_CITY)) {
+      /* Don't bribe workers or city founders! */
+      if (aia_utype_is_considered_worker(unit_type_get(pvictim))
+          || unit_can_do_action_result(pvictim, ACTRES_FOUND_CITY)) {
         continue;
       }
     }
@@ -774,8 +734,6 @@ void dai_manage_diplomat(struct ai_type *ait, struct player *pplayer,
   parameter.get_zoc = NULL; /* kludge */
   parameter.get_TB = no_intermediate_fights;
   pfm = pf_map_new(&parameter);
-
-  pcity = tile_city(unit_tile(punit));
 
   /* Look for someone to bribe */
   if (!dai_diplomat_bribe_nearby(ait, pplayer, punit, pfm)) {

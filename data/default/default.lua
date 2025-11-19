@@ -114,7 +114,7 @@ function _deflua_hut_get_barbarians(unit)
                    _("An abandoned village is here."))
     return true
   end
-  
+
   local alive = tile:unleash_barbarians()
   if alive then
     notify.event(owner, tile, E.HUT_BARB,
@@ -127,9 +127,20 @@ function _deflua_hut_get_barbarians(unit)
   return alive
 end
 
+-- Reveal map around the hut
+function _deflua_hut_reveal_map(unit)
+  local owner = unit.owner
+
+  notify.event(owner, unit.tile, E.HUT_MAP,
+               _("You find a map of the surrounding terrain."))
+  for revealtile in unit.tile:circle_iterate(30) do
+    revealtile:show(owner)
+  end
+end
+
 -- Randomly choose a hut event
 function _deflua_hut_enter_callback(unit)
-  local chance = random(0, 11)
+  local chance = random(0, 13)
   local alive = true
 
   if chance == 0 then
@@ -150,6 +161,8 @@ function _deflua_hut_enter_callback(unit)
     if not _deflua_hut_get_city(unit) then
       _deflua_hut_consolation_prize(unit)
     end
+  elseif chance == 12 or chance == 13 then
+    _deflua_hut_reveal_map(unit)
   end
 
   -- continue processing if unit is alive
@@ -215,3 +228,19 @@ function _deflua_harmless_disaster_message(disaster, city, had_internal_effect)
 end
 
 signal.connect("disaster_occurred", "_deflua_harmless_disaster_message")
+
+function _deflua_unit_loss_messages(unit, player, reason)
+  if reason == "fuel" then
+    if unit.utype:has_flag('Coast') then
+      notify.event(player, unit.tile, E.UNIT_LOST_MISC,
+                   _("Your %s has run out of supplies."),
+                   unit:tile_link_text())
+    else
+      notify.event(player, unit.tile, E.UNIT_LOST_MISC,
+                   _("Your %s has run out of fuel."),
+                   unit:tile_link_text())
+    end
+  end
+end
+
+signal.connect("unit_lost", "_deflua_unit_loss_messages")

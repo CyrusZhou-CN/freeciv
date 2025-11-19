@@ -22,7 +22,6 @@
  * it can install SDL's own. */
 #ifdef SDL2_PLAIN_INCLUDE
 #include <SDL.h>
-#include <SDL_mixer.h>
 #else  /* PLAIN_INCLUDE */
 #include <SDL2/SDL.h>
 #endif /* PLAIN_INCLUDE */
@@ -62,6 +61,7 @@
 #include "version.h"
 
 /* client */
+#include "audio.h"
 #include "client_main.h"
 #include "climisc.h"
 #include "clinet.h"
@@ -86,6 +86,7 @@
 #include "graphics.h"
 #include "gui_stuff.h"
 #include "happiness.h"
+#include "helpdlg.h"
 #include "inteldlg.h"
 #include "mapctrl.h"
 #include "mapview.h"
@@ -185,7 +186,12 @@ gint cur_x, cur_y;
 
 static bool gui_up = FALSE;
 
+static bool audio_paused = FALSE;
+static bool client_focus = TRUE;
+
 static struct video_mode vmode = { -1, -1 };
+
+static void set_g_log_callbacks(void);
 
 static gboolean show_info_button_release(GtkWidget *w, GdkEventButton *ev, gpointer data);
 static gboolean show_info_popup(GtkWidget *w, GdkEventButton *ev, gpointer data);
@@ -231,12 +237,20 @@ static void log_callback_utf8(enum log_level level, const char *message,
 }
 
 /**********************************************************************//**
- Called while in gtk_main() (which is all of the time)
- TIMER_INTERVAL is now set by real_timer_callback()
+  Called while in gtk_main() (which is all of the time)
+  TIMER_INTERVAL is now set by real_timer_callback()
 **************************************************************************/
 static gboolean timer_callback(gpointer data)
 {
   double seconds = real_timer_callback();
+
+  if (!audio_paused && !client_focus) {
+    audio_pause();
+    audio_paused = TRUE;
+  } else if (audio_paused && client_focus) {
+    audio_resume();
+    audio_paused = FALSE;
+  }
 
   timer_id = g_timeout_add(seconds * 1000, timer_callback, NULL);
 
@@ -261,22 +275,21 @@ static void print_usage(void)
              _("-r, --resolution WIDTHxHEIGHT\tAssume given resolution "
                "screen\n"));
 
-#ifdef GTK3_ZOOM_ENABLED
+#ifdef EXP_ZOOM_LEVELS
   fc_fprintf(stderr,
              /* TRANS: Keep word 'default' untranslated */
              _("-z, --zoom LEVEL\tSet zoom level; use value 'default' "
                "to reset\n\n"));
 #else
   fc_fprintf(stderr, "\n");
-#endif /* GTK3_ZOOM_ENABLED */
+#endif /* EXP_ZOOM_LEVELS */
 
   /* TRANS: No full stop after the URL, could cause confusion. */
   fc_fprintf(stderr, _("Report bugs at %s\n"), BUG_URL);
 }
 
 /**********************************************************************//**
-  Search for command line options. right now, it's just help
-  semi-useless until we have options that aren't the same across all clients.
+  Search for gui-specific command-line options.
 **************************************************************************/
 static void parse_options(int argc, char **argv)
 {
@@ -289,7 +302,7 @@ static void parse_options(int argc, char **argv)
       print_usage();
       exit(EXIT_SUCCESS);
 
-#ifdef GTK3_ZOOM_ENABLED
+#ifdef EXP_ZOOM_LEVELS
     } else if ((option = get_option_malloc("--zoom", argv, &i, argc, FALSE))) {
       char *endptr;
 
@@ -300,19 +313,16 @@ static void parse_options(int argc, char **argv)
         gui_options.zoom_set = FALSE;
       }
       free(option);
-#endif /* GTK3_ZOOM_ENABLED */
+#endif /* EXP_ZOOM_LEVELS */
 
     } else if ((option = get_option_malloc("--resolution", argv, &i, argc, FALSE))) {
       if (!string_to_video_mode(option, &vmode)) {
-        fc_fprintf(stderr, _("Illegal video mode '%s'"), option);
+        fc_fprintf(stderr, _("Illegal video mode '%s'\n"), option);
         exit(EXIT_FAILURE);
       }
       free(option);
     }
     /* Can't check against unknown options, as those might be gtk options */
-    /* TODO: gtk+ is about to drop its commandline options anyway,
-     *       so we can stop supporting them and have error checking
-     *       added here. */
 
     i++;
   }
@@ -382,7 +392,7 @@ gboolean map_canvas_focus(void)
   This function ensures an entry widget (like the inputline) always gets
   first dibs at handling a keyboard event.
 **************************************************************************/
-static gboolean toplevel_handler(GtkWidget *w, GdkEventKey *ev, gpointer data)
+static gboolean toplevel_handler(GtkWidget *w, GdkEvent *ev, gpointer data)
 {
   GtkWidget *focus;
 
@@ -392,7 +402,7 @@ static gboolean toplevel_handler(GtkWidget *w, GdkEventKey *ev, gpointer data)
         || (GTK_IS_TEXT_VIEW(focus)
             && gtk_text_view_get_editable(GTK_TEXT_VIEW(focus)))) {
       /* Propagate event to currently focused entry widget. */
-      if (gtk_widget_event(focus, (GdkEvent *) ev)) {
+      if (gtk_widget_event(focus, ev)) {
 	/* Do not propagate event to our children. */
 	return TRUE;
       }
@@ -452,14 +462,43 @@ static gboolean key_press_map_canvas(GtkWidget *w, GdkEventKey *ev,
     }
   }
 
-#ifdef GTK3_ZOOM_ENABLED
-  if (!(ev->state & GDK_CONTROL_MASK)) {
+  if (ev->state & GDK_SHIFT_MASK) {
+    bool volchange = FALSE;
+
     switch (ev->keyval) {
     case GDK_KEY_plus:
+    case GDK_KEY_KP_Add:
+      gui_options.sound_effects_volume += 10;
+      volchange = TRUE;
+      break;
+
+    case GDK_KEY_minus:
+    case GDK_KEY_KP_Subtract:
+      gui_options.sound_effects_volume -= 10;
+      volchange = TRUE;
+      break;
+
+    default:
+      break;
+    }
+
+    if (volchange) {
+      struct option *poption = optset_option_by_name(client_optset, "sound_effects_volume");
+
+      gui_options.sound_effects_volume = CLIP(0, gui_options.sound_effects_volume, 100);
+      option_changed(poption);
+
+      return TRUE;
+    }
+  } else if (!(ev->state & GDK_CONTROL_MASK)) {
+    switch (ev->keyval) {
+    case GDK_KEY_plus:
+    case GDK_KEY_KP_Add:
       zoom_step_up();
       return TRUE;
 
     case GDK_KEY_minus:
+    case GDK_KEY_KP_Subtract:
       zoom_step_down();
       return TRUE;
 
@@ -467,59 +506,10 @@ static gboolean key_press_map_canvas(GtkWidget *w, GdkEventKey *ev,
       break;
     }
   }
-#endif /* GTK3_ZOOM_ENABLED */
 
   /* Return here if observer */
   if (client_is_observer()) {
     return FALSE;
-  }
-
-  fc_assert(MAX_NUM_BATTLEGROUPS == 4);
-
-  if ((ev->state & GDK_CONTROL_MASK)) {
-    switch (ev->keyval) {
-
-    case GDK_KEY_F1:
-      key_unit_assign_battlegroup(0, (ev->state & GDK_SHIFT_MASK));
-      return TRUE;
-
-    case GDK_KEY_F2:
-      key_unit_assign_battlegroup(1, (ev->state & GDK_SHIFT_MASK));
-      return TRUE;
-
-    case GDK_KEY_F3:
-      key_unit_assign_battlegroup(2, (ev->state & GDK_SHIFT_MASK));
-      return TRUE;
-
-    case GDK_KEY_F4:
-      key_unit_assign_battlegroup(3, (ev->state & GDK_SHIFT_MASK));
-      return TRUE;
-
-    default:
-      break;
-    };
-  } else if ((ev->state & GDK_SHIFT_MASK)) {
-    switch (ev->keyval) {
-
-    case GDK_KEY_F1:
-      key_unit_select_battlegroup(0, FALSE);
-      return TRUE;
-
-    case GDK_KEY_F2:
-      key_unit_select_battlegroup(1, FALSE);
-      return TRUE;
-
-    case GDK_KEY_F3:
-      key_unit_select_battlegroup(2, FALSE);
-      return TRUE;
-
-    case GDK_KEY_F4:
-      key_unit_select_battlegroup(3, FALSE);
-      return TRUE;
-
-    default:
-      break;
-    };
   }
 
   switch (ev->keyval) {
@@ -632,9 +622,7 @@ static gboolean toplevel_key_press_handler(GtkWidget *w, GdkEventKey *ev,
     return FALSE;
   }
 
-  switch (ev->keyval) {
-
-  case GDK_KEY_apostrophe:
+  if (ev->keyval == GDK_KEY_apostrophe) {
     /* Allow this even if not in main map view; chatline is present on
      * some other pages too */
 
@@ -656,12 +644,7 @@ static gboolean toplevel_key_press_handler(GtkWidget *w, GdkEventKey *ev,
     if (inputline_is_visible()) {
       inputline_grab_focus();
       return TRUE;
-    } else {
-      break;
     }
-
-  default:
-    break;
   }
 
   if (!gtk_widget_get_mapped(top_vbox)
@@ -766,6 +749,26 @@ static gboolean mouse_scroll_mapcanvas(GtkWidget *w, GdkEventScroll *ev)
 }
 
 /**********************************************************************//**
+  Freeciv window has lost focus
+**************************************************************************/
+gboolean fc_lost_focus(GtkWidget *w, GdkEventKey *ev, gpointer data)
+{
+  client_focus = FALSE;
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Freeciv window has gained focus
+**************************************************************************/
+gboolean fc_gained_focus(GtkWidget *w, GdkEventKey *ev, gpointer data)
+{
+  client_focus = TRUE;
+
+  return TRUE;
+}
+
+/**********************************************************************//**
   Reattaches the detached widget when the user destroys it.
 **************************************************************************/
 static void tearoff_destroy(GtkWidget *w, gpointer data)
@@ -791,9 +794,9 @@ static void tearoff_destroy(GtkWidget *w, gpointer data)
 /**********************************************************************//**
   Propagates a keypress in a tearoff back to the toplevel window.
 **************************************************************************/
-static gboolean propagate_keypress(GtkWidget *w, GdkEventKey *ev)
+static gboolean propagate_keypress(GtkWidget *w, GdkEvent *ev)
 {
-  gtk_widget_event(toplevel, (GdkEvent *)ev);
+  gtk_widget_event(toplevel, ev);
 
   return FALSE;
 }
@@ -896,7 +899,7 @@ static GtkWidget *detached_widget_fill(GtkWidget *tearbox)
 }
 
 /**********************************************************************//**
-  Called to build the unit_below pixmap table.  This is the table on the
+  Called to build the unit_below pixmap table. This is the table on the
   left of the screen that shows all of the inactive units in the current
   tile.
 
@@ -907,10 +910,14 @@ static void populate_unit_image_table(void)
   int i, width;
   GtkWidget *table = unit_image_table;
   GdkPixbuf *pix;
+  int ttw;
 
-  /* get width of the overview window */
-  width = (overview_canvas_store_width > GUI_GTK_OVERVIEW_MIN_XSIZE) ? overview_canvas_store_width
-                                               : GUI_GTK_OVERVIEW_MIN_XSIZE;
+  /* Get width of the overview window */
+  width = (overview_canvas_store_width > GUI_GTK_OVERVIEW_MIN_XSIZE)
+    ? overview_canvas_store_width
+    : GUI_GTK_OVERVIEW_MIN_XSIZE;
+
+  ttw = tileset_tile_width(tileset);
 
   if (GUI_GTK_OPTION(small_display_layout)) {
     /* We want arrow to appear if there is other units in addition
@@ -918,7 +925,7 @@ static void populate_unit_image_table(void)
        can be 0 other units to not to display arrow. */
     num_units_below = 1 - 1;
   } else {
-    num_units_below = width / (int) tileset_tile_width(tileset);
+    num_units_below = width / ttw;
     num_units_below = CLIP(1, num_units_below, MAX_NUM_UNITS_BELOW);
   }
 
@@ -929,8 +936,7 @@ static void populate_unit_image_table(void)
   gtk_widget_add_events(unit_image, GDK_BUTTON_PRESS_MASK);
   g_object_ref(unit_image);
   unit_image_button = gtk_event_box_new();
-  gtk_widget_set_size_request(unit_image_button,
-                              tileset_tile_width(tileset), -1);
+  gtk_widget_set_size_request(unit_image_button, ttw, -1);
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(unit_image_button), FALSE);
   g_object_ref(unit_image_button);
   gtk_container_add(GTK_CONTAINER(unit_image_button), unit_image);
@@ -947,9 +953,9 @@ static void populate_unit_image_table(void)
       gtk_widget_add_events(unit_below_image[i], GDK_BUTTON_PRESS_MASK);
       unit_below_image_button[i] = gtk_event_box_new();
       g_object_ref(unit_below_image_button[i]);
-      gtk_widget_set_size_request(unit_below_image_button[i],
-                                  tileset_tile_width(tileset), -1);
-      gtk_event_box_set_visible_window(GTK_EVENT_BOX(unit_below_image_button[i]), FALSE);
+      gtk_widget_set_size_request(unit_below_image_button[i], ttw, -1);
+      gtk_event_box_set_visible_window(GTK_EVENT_BOX(unit_below_image_button[i]),
+                                       FALSE);
       gtk_container_add(GTK_CONTAINER(unit_below_image_button[i]),
                         unit_below_image[i]);
       g_signal_connect(unit_below_image_button[i],
@@ -962,7 +968,7 @@ static void populate_unit_image_table(void)
     }
   }
 
-  /* create arrow (popup for all units on the selected tile) */
+  /* Create arrow (popup for all units on the selected tile) */
   pix = sprite_get_pixbuf(get_arrow_sprite(tileset, ARROW_RIGHT));
   more_arrow_pixmap = gtk_image_new_from_pixbuf(pix);
   g_object_ref(more_arrow_pixmap);
@@ -991,11 +997,11 @@ static void populate_unit_image_table(void)
   if (!GUI_GTK_OPTION(small_display_layout)) {
     /* Display on bottom row. */
     gtk_grid_attach(GTK_GRID(table), more_arrow_pixmap_container,
-                    MAX_NUM_UNITS_BELOW, 1, 1, 1);
+                    num_units_below, 1, 1, 1);
   } else {
     /* Display on top row (there is no bottom row). */
     gtk_grid_attach(GTK_GRID(table), more_arrow_pixmap_container,
-                    MAX_NUM_UNITS_BELOW, 0, 1, 1);
+                    1, 0, 1, 1);
   }
 
   gtk_widget_show_all(table);
@@ -1037,7 +1043,7 @@ void reset_unit_table(void)
   /* Unreference all of the widgets that we're about to reallocate, thus
    * avoiding a memory leak. Remove them from the container first, just
    * to be safe. Note, the widgets are ref'd in
-   * populatate_unit_image_table. */
+   * populate_unit_image_table. */
   free_unit_table();
 
   populate_unit_image_table();
@@ -1120,7 +1126,7 @@ static void setup_canvas_color_for_state(GtkStateFlags state)
 static void setup_widgets(void)
 {
   GtkWidget *page, *ebox, *hgrid, *hgrid2, *label;
-  GtkWidget *frame, *table, *table2, *paned, *hpaned, *sw, *text;
+  GtkWidget *frame, *table, *table2, *paned, *sw, *text;
   GtkWidget *button, *view, *vgrid, *right_vbox = NULL;
   int i;
   char buf[256];
@@ -1560,9 +1566,11 @@ static void setup_widgets(void)
   /* *** The message window -- this is a detachable widget *** */
 
   if (GUI_GTK_OPTION(message_chat_location) == GUI_GTK_MSGCHAT_MERGED) {
-    bottom_hpaned = hpaned = paned;
+    bottom_hpaned = paned;
     right_notebook = bottom_notebook = top_notebook;
   } else {
+    GtkWidget *hpaned;
+
     dtach_lowbox = detached_widget_new();
     gtk_paned_pack2(GTK_PANED(paned), dtach_lowbox, FALSE, TRUE);
     avbox = detached_widget_fill(dtach_lowbox);
@@ -1673,11 +1681,84 @@ static void setup_widgets(void)
 }
 
 /**********************************************************************//**
+  g_log callback to log with freelog
+**************************************************************************/
+static void g_log_to_freelog_cb(const gchar *log_domain,
+                                GLogLevelFlags log_level,
+                                const gchar *message,
+                                gpointer user_data)
+{
+  enum log_level fllvl = LOG_ERROR;
+
+  switch (log_level) {
+  case G_LOG_LEVEL_DEBUG:
+    fllvl = LOG_DEBUG;
+    break;
+  case G_LOG_LEVEL_WARNING:
+    fllvl = LOG_WARN;
+    break;
+  default:
+    break;
+  }
+
+  if (log_domain != NULL) {
+    log_base(fllvl, "%s: %s", log_domain, message);
+  } else {
+    log_base(fllvl, "%s", message);
+  }
+}
+
+/**********************************************************************//**
+  g_log callback to log with freelog
+**************************************************************************/
+static GLogWriterOutput g_log_writer_to_freelog_cb(GLogLevelFlags log_level,
+                                                   const GLogField *fields,
+                                                   gsize n_fields,
+                                                   gpointer user_data)
+{
+  /* No need to have formatter of our own - let's use glib's default one. */
+  gchar *out = g_log_writer_format_fields(log_level, fields, n_fields, FALSE);
+
+  g_log_to_freelog_cb(NULL, log_level, out, NULL);
+
+  return G_LOG_WRITER_HANDLED;
+}
+
+/**********************************************************************//**
+  Set up g_log callback for a single domain.
+**************************************************************************/
+static void set_g_log_callback_domain(const char *domain)
+{
+  g_log_set_handler(domain,
+                    G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_ERROR | G_LOG_LEVEL_WARNING
+                    | G_LOG_LEVEL_MASK
+                    | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION,
+                    g_log_to_freelog_cb, NULL);
+}
+
+/**********************************************************************//**
+  Set up g_log callbacks.
+**************************************************************************/
+static void set_g_log_callbacks(void)
+{
+  /* Old API, still used by many log producers */
+  g_log_set_default_handler(g_log_to_freelog_cb, NULL);
+
+  set_g_log_callback_domain("Gtk");
+  set_g_log_callback_domain("Gdk");
+  set_g_log_callback_domain("Glib");
+
+  /* glib >= 2.50 API */
+  g_log_set_writer_func(g_log_writer_to_freelog_cb, NULL, NULL);
+}
+
+/**********************************************************************//**
   Called from main().
 **************************************************************************/
 void ui_init(void)
 {
   log_set_callback(log_callback_utf8);
+  set_g_log_callbacks();
   set_frame_by_frame_animation();
 }
 
@@ -1686,7 +1767,7 @@ void ui_init(void)
 **************************************************************************/
 int main(int argc, char **argv)
 {
-  return client_main(argc, argv);
+  return client_main(argc, argv, FALSE);
 }
 
 /**********************************************************************//**
@@ -1806,19 +1887,24 @@ static void migrate_options_from_gtk3(void)
 /**********************************************************************//**
   Called from client_main(), is what it's named.
 **************************************************************************/
-void ui_main(int argc, char **argv)
+int ui_main(int argc, char **argv)
 {
   PangoFontDescription *toplevel_font_name;
   guint sig;
 
   parse_options(argc, argv);
 
-  /* the locale has already been set in init_nls() and the Win32-specific
+  /* the locale has already been set in init_nls() and the windows-specific
    * locale logic in gtk_init() causes problems with zh_CN (see PR#39475) */
   gtk_disable_setlocale();
 
   /* GTK withdraw gtk options. Process GTK arguments */
-  gtk_init(&argc, &argv);
+  if (!gtk_init_check(&argc, &argv)) {
+    log_fatal(_("Failed to open graphical mode."));
+    exit(EXIT_FAILURE);
+  }
+
+  help_system_init();
 
   dlg_tab_provider_prepare();
 
@@ -1829,6 +1915,11 @@ void ui_main(int argc, char **argv)
   }
   g_signal_connect(toplevel, "key_press_event",
                    G_CALLBACK(toplevel_handler), NULL);
+
+  g_signal_connect(toplevel, "focus_out_event",
+                   G_CALLBACK(fc_lost_focus), NULL);
+  g_signal_connect(toplevel, "focus_in_event",
+                   G_CALLBACK(fc_gained_focus), NULL);
 
   gtk_window_set_role(GTK_WINDOW(toplevel), "toplevel");
   gtk_widget_realize(toplevel);
@@ -1938,6 +2029,11 @@ void ui_main(int argc, char **argv)
   gtk_main();
   gui_up = FALSE;
 
+  /* We have extra ref for unit_info_box that has protected
+   * it from getting destroyed when editinfobox_refresh()
+   * moves widgets around. Free that extra ref here. */
+  g_object_unref(unit_info_box);
+
   destroy_server_scans();
   free_mapcanvas_and_overview();
   spaceship_dialog_done();
@@ -1950,8 +2046,12 @@ void ui_main(int argc, char **argv)
   free_unit_table();
   editgui_free();
   gtk_widget_destroy(toplevel_tabs);
+  gtk_widget_destroy(toplevel);
+  menus_free();
   message_buffer = NULL; /* Result of destruction of everything */
   tileset_free_tiles(tileset);
+
+  return EXIT_SUCCESS;
 }
 
 /**********************************************************************//**

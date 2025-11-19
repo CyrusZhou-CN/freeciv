@@ -33,13 +33,10 @@
 
 #include "dialogs_g.h"
 
-static void soundset_suggestion_callback(GtkWidget *dlg, gint arg);
-static void musicset_suggestion_callback(GtkWidget *dlg, gint arg);
-
 /************************************************************************//**
   Callback either loading suggested soundset or doing nothing
 ****************************************************************************/
-static void soundset_suggestion_callback(GtkWidget *dlg, gint arg)
+static void soundset_suggestion_response(gint arg)
 {
   if (arg == GTK_RESPONSE_YES) {
     /* User accepted soundset loading */
@@ -76,25 +73,22 @@ void popup_soundset_suggestion_dialog(void)
               game.control.preferred_soundset, sound_set_name);
 
   label = gtk_label_new(buf);
-  gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label);
+  gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label);
   gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
   gtk_widget_show(label);
-
-  g_signal_connect(dialog, "response",
-                   G_CALLBACK(soundset_suggestion_callback), NULL);
 
   /* In case incoming rulesets are incompatible with current soundset
    * we need to block their receive before user has accepted loading
    * of the correct soundset. */
-  gtk_dialog_run(GTK_DIALOG(dialog));
+  soundset_suggestion_response(blocking_dialog(dialog));
 
-  gtk_widget_destroy(dialog);
+  gtk_window_destroy(GTK_WINDOW(dialog));
 }
 
 /************************************************************************//**
   Callback either loading suggested musicset or doing nothing
 ****************************************************************************/
-static void musicset_suggestion_callback(GtkWidget *dlg, gint arg)
+static void musicset_suggestion_response(gint arg)
 {
   if (arg == GTK_RESPONSE_YES) {
     /* User accepted musicset loading */
@@ -129,17 +123,14 @@ void popup_musicset_suggestion_dialog(void)
               game.control.preferred_musicset, music_set_name);
 
   label = gtk_label_new(buf);
-  gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label);
+  gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label);
   gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
   gtk_widget_show(label);
 
-  g_signal_connect(dialog, "response",
-                   G_CALLBACK(musicset_suggestion_callback), NULL);
-
   /* In case incoming rulesets are incompatible with current musicset
    * we need to block their receive before user has accepted loading
-   * of the correct soundset. */
-  gtk_dialog_run(GTK_DIALOG(dialog));
+   * of the correct musicset. */
+  musicset_suggestion_response(blocking_dialog(dialog));
 
-  gtk_widget_destroy(dialog);
+  gtk_window_destroy(GTK_WINDOW(dialog));
 }

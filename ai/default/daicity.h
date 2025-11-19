@@ -14,7 +14,7 @@
 #define FC__DAICITY_H
 
 /* common */
-#include "effects.h" /* enum effect_type */
+#include "effects.h"  /* enum effect_type */
 #include "fc_types.h"
 
 /* server/advisors */
@@ -23,7 +23,7 @@
 struct adv_data;
 struct tech_vector;
 
-struct ai_activity_cache; /* defined and only used within aicity.c */
+struct ai_activity_cache; /* Defined and only used within daicity.c */
 
 /* Who's coming to kill us, for attack co-ordination */
 struct ai_invasion {
@@ -100,11 +100,17 @@ void dai_build_adv_adjust(struct ai_type *ait, struct player *pplayer,
 
 void dai_consider_wonder_city(struct ai_type *ait, struct city *pcity, bool *result);
 
+bool dai_can_city_build_improvement_later(const struct city *pcity,
+                                          const struct impr_type *pimprove);
+bool
+dai_can_player_build_improvement_later(const struct player *p,
+                                       const struct impr_type *pimprove);
+
 Impr_type_id dai_find_source_building(struct city *pcity,
                                       enum effect_type effect_type,
-                                      struct unit_type *utype);
+                                      const struct unit_type *utype);
 
 adv_want dai_city_want(struct player *pplayer, struct city *acity, 
                        struct adv_data *adv, struct impr_type *pimprove);
 
-#endif  /* FC__DAICITY_H */
+#endif /* FC__DAICITY_H */

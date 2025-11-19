@@ -209,7 +209,7 @@ static int explorer_desirable(struct tile *ptile, struct player *pplayer,
 
   /* First do some checks that would make a tile completely non-desirable.
    * If we're a barbarian and the tile has a hut, don't go there. */
-  /* FIXME: HUT_NOTHING ok */
+  /* FIXME: Would be ok for a unit that does not enter or frighten hut */
   if (is_barbarian(pplayer) && hut_on_tile(ptile)) {
     return 0;
   }
@@ -251,10 +251,9 @@ static int explorer_desirable(struct tile *ptile, struct player *pplayer,
 
   if ((!is_ai(pplayer) || !has_handicap(pplayer, H_HUTS))
       && map_is_known(ptile, pplayer)
-      && unit_can_displace_hut(punit, ptile)) {
+      && unit_can_enter_hut(punit, ptile)) {
     /* we want to explore huts whenever we can,
      * even if doing so will not uncover any tiles. */
-    /* FIXME: should HUT_FRIGHTEN explorer strive to destroy huts? */
     desirable += HUT_SCORE;
   }
 
@@ -281,7 +280,7 @@ enum unit_move_result manage_auto_explorer(struct unit *punit)
   double log_most_desirable = -FC_INFINITY;
 
   /* The maximum distance we are willing to search. It decreases depending
-   * on the want of already discovered tagets.  It is defined as the distance
+   * on the want of already discovered targets. It is defined as the distance
    * at which a tile with BEST_POSSIBLE_SCORE would have to be found in
    * order to be better than the current most_desirable tile. */
   int max_dist = FC_INFINITY;

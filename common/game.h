@@ -24,16 +24,17 @@ extern "C" {
 #endif
 
 /* utility */
-#include "fcthread.h"
+#include "randseed.h"
 #include "shared.h"
 #include "timing.h"
 
 /* common */
-#include "connection.h"		/* struct conn_list */
+#include "connection.h"	        /* struct conn_list */
 #include "fc_types.h"
-#include "player.h"
 #include "packets.h"
-#include "world_object.h"
+#include "traits.h"
+
+struct world;
 
 enum debug_globals {
   DEBUG_FERRIES,
@@ -95,6 +96,7 @@ struct civ_game {
   struct conn_list *all_connections;   /* including not yet established */
   struct conn_list *est_connections;   /* all established client conns */
   struct conn_list *glob_observers;    /* global observers */
+  struct conn_list *web_client_connections; /* Connections from web client */
 
   struct veteran_system *veteran; /* veteran system */
 
@@ -169,11 +171,12 @@ struct civ_game {
       int onsetbarbarian;
       int pingtime;
       int pingtimeout;
+      bool ip_hide;
       int ransom_gold;
       int razechance;
       unsigned revealmap;
       int revolution_length;
-      int spaceship_travel_time;
+      int spaceship_travel_pct;
       bool threaded_save;
       int save_compress_level;
       enum fz_method save_compress_type;
@@ -217,10 +220,10 @@ struct civ_game {
       char save_name[MAX_LEN_NAME];
       bool scorelog;
       enum scorelog_level scoreloglevel;
-      char scorefile[MAX_LEN_NAME];
+      char scorefile[MAX_LEN_PATH];
       int scoreturn;    /* next make_history_report() */
-      int seed_setting;
-      int seed;
+      randseed seed_setting;
+      randseed seed;
 
       bool global_warming;
       int global_warming_percent;
@@ -267,6 +270,10 @@ struct civ_game {
 
       struct trait_limits default_traits[TRAIT_COUNT];
 
+      struct player *random_move_time;
+
+      char default_ai_type_name[256];
+
       struct {
         char *description_file;
         char *nationlist;
@@ -292,13 +299,40 @@ struct civ_game {
   } callbacks;
 };
 
-bool is_server(void);
+extern bool am_i_server;
+
+extern struct civ_game game;
+
+/**********************************************************************//**
+  Is the program type server?
+**************************************************************************/
+static inline bool is_server(void)
+{
+  return am_i_server;
+}
+
 void i_am_server(void);
 void i_am_client(void);
+
+/**********************************************************************//**
+  Set program type to tool.
+**************************************************************************/
 static inline void i_am_tool(void)
 {
   i_am_server(); /* No difference between a tool and server at the moment */
 }
+
+#ifdef FREECIV_WEB
+/**********************************************************************//**
+  Is there currently any connections from web-client(s)
+**************************************************************************/
+static inline bool any_web_conns(void)
+{
+  return conn_list_size(game.web_client_connections) > 0;
+}
+#else  /* FREECIV_WEB */
+#define any_web_conns() (FALSE)
+#endif /* FREECIV_WEB */
 
 void game_init(bool keep_ruleset_value);
 void game_map_init(void);
@@ -330,8 +364,23 @@ void user_flag_free(struct user_flag *flag);
 
 int current_turn_timeout(void);
 
-extern struct civ_game game;
-extern struct world wld;
+extern bool _ruleset_compat_mode;
+
+/**********************************************************************//**
+  Set ruleset compat mode indicator
+**************************************************************************/
+static inline void set_ruleset_compat_mode(bool active)
+{
+  _ruleset_compat_mode = active;
+}
+
+/**********************************************************************//**
+  Get ruleset compat mode indicator
+**************************************************************************/
+static inline bool is_ruleset_compat_mode(void)
+{
+  return _ruleset_compat_mode;
+}
 
 #define GAME_DEFAULT_SEED        0
 #define GAME_MIN_SEED            0
@@ -359,7 +408,7 @@ extern struct world wld;
 #define GAME_DEFAULT_ANGRYCITIZEN TRUE
 
 #define GAME_DEFAULT_END_TURN    5000
-#define GAME_MIN_END_TURN        0
+#define GAME_MIN_END_TURN        1
 #define GAME_MAX_END_TURN        32767
 
 #define GAME_DEFAULT_MIN_PLAYERS     1
@@ -550,9 +599,9 @@ extern struct world wld;
 #define GAME_DEFAULT_VICTORY_CONDITIONS (1 << VC_SPACERACE | 1 << VC_ALLIED)
 #define GAME_DEFAULT_END_SPACESHIP   TRUE
 
-#define GAME_DEFAULT_SPACESHIP_TRAVEL_TIME 100
-#define GAME_MIN_SPACESHIP_TRAVEL_TIME     50
-#define GAME_MAX_SPACESHIP_TRAVEL_TIME     1000
+#define GAME_DEFAULT_SPACESHIP_TRAVEL_PCT 100
+#define GAME_MIN_SPACESHIP_TRAVEL_PCT     50
+#define GAME_MAX_SPACESHIP_TRAVEL_PCT     1000
 
 #define GAME_DEFAULT_TURNBLOCK       TRUE
 
@@ -597,6 +646,8 @@ extern struct world wld;
 #define GAME_DEFAULT_PINGTIMEOUT     60
 #define GAME_MIN_PINGTIMEOUT         60
 #define GAME_MAX_PINGTIMEOUT         1800
+
+#define GAME_DEFAULT_IPHIDE          FALSE
 
 #define GAME_DEFAULT_NOTRADESIZE     0
 #define GAME_MIN_NOTRADESIZE         0
@@ -662,6 +713,10 @@ extern struct world wld;
 #define GAME_HARDCODED_DEFAULT_SKILL_LEVEL 3 /* that was 'easy' in old saves */
 #define GAME_OLD_DEFAULT_SKILL_LEVEL 5  /* normal; for oldest save games */
 
+#define GAME_DEFAULT_TOP_CITIES_COUNT 5
+#define GAME_MIN_TOP_CITIES_COUNT     0
+#define GAME_MAX_TOP_CITIES_COUNT     40
+
 #define GAME_DEFAULT_DEMOGRAPHY      "NASRLPEMOCqrb"
 #define GAME_DEFAULT_ALLOW_TAKE      "HAhadOo"
 
@@ -681,7 +736,9 @@ extern struct world wld;
 #define GAME_MIN_COMPRESS_LEVEL     1
 #define GAME_MAX_COMPRESS_LEVEL     9
 
-#if defined(FREECIV_HAVE_LIBLZMA)
+#if defined(FREECIV_HAVE_LIBZSTD)
+#  define GAME_DEFAULT_COMPRESS_TYPE FZ_ZSTD
+#elif defined(FREECIV_HAVE_LIBLZMA)
 #  define GAME_DEFAULT_COMPRESS_TYPE FZ_XZ
 #elif defined(FREECIV_HAVE_LIBZ)
 #  define GAME_DEFAULT_COMPRESS_TYPE FZ_ZLIB
@@ -698,7 +755,7 @@ extern struct world wld;
 #define GAME_MIN_REVOLUTION_LENGTH      1
 #define GAME_MAX_REVOLUTION_LENGTH      20
 
-#define GAME_START_YEAR -4000
+#define GAME_DEFAULT_START_YEAR -4000
 
 #define GAME_DEFAULT_AIRLIFTINGSTYLE AIRLIFTING_CLASSICAL
 #define GAME_DEFAULT_PERSISTENTREADY PERSISTENTR_DISABLED
@@ -811,11 +868,8 @@ extern struct world wld;
 #define RS_DEFAULT_CIVIL_WAR_CELEB               -5
 #define RS_DEFAULT_CIVIL_WAR_UNHAPPY             5
 
-#define RS_DEFAULT_SLOW_INVASIONS                TRUE
-
 #define RS_DEFAULT_TIRED_ATTACK                  FALSE
-#define RS_DEFAULT_ONLY_KILLING_VETERAN          FALSE
-#define RS_DEFAULT_NUKE_POP_LOSS_PCT             50
+#define RS_DEFAULT_NUKE_POP_LOSS_PCT             49
 #define RS_MIN_NUKE_POP_LOSS_PCT                 0
 #define RS_MAX_NUKE_POP_LOSS_PCT                 100
 #define RS_DEFAULT_NUKE_DEFENDER_SURVIVAL_CHANCE_PCT 0
@@ -840,16 +894,8 @@ extern struct world wld;
 #define RS_MIN_TECH_UPKEEP_DIVIDER       1
 #define RS_MAX_TECH_UPKEEP_DIVIDER       100000
 
-#define RS_DEFAULT_BASE_TECH_COST                20
-#define RS_MIN_BASE_TECH_COST                    0
-#define RS_MAX_BASE_TECH_COST                    20000
-
-#define RS_DEFAULT_FORCE_TRADE_ROUTE             FALSE
-#define RS_DEFAULT_FORCE_CAPTURE_UNITS           FALSE
-#define RS_DEFAULT_FORCE_BOMBARD                 FALSE
-#define RS_DEFAULT_FORCE_EXPLODE_NUCLEAR         FALSE
-
 #define RS_DEFAULT_POISON_EMPTIES_FOOD_STOCK     FALSE
+#define RS_DEFAULT_STEAL_MAP_REVEALS_CITIES      TRUE
 #define RS_DEFAULT_ACTION_ACTOR_CONSUMING_ALWAYS FALSE
 #define RS_DEFAULT_USER_ACTION_TARGET_KIND       ATK_UNIT
 #define RS_DEFAULT_ACTION_MIN_RANGE              0

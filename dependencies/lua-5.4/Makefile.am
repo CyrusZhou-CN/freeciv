@@ -2,9 +2,8 @@
 
 SUBDIRS = src
 
-EXTRA_DIST = Version \
+EXTRA_DIST = Version.txt \
 	freeciv_lua.patch \
 	doc/readme.html \
 	doc/logo.gif \
-	doc/alert.png \
 	doc/osi-certified-72x60.png

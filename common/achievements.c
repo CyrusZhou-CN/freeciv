@@ -325,6 +325,8 @@ bool achievement_check(struct achievement *ach, struct player *pplayer)
       free(seen);
       return FALSE;
     }
+  case ACHIEVEMENT_KILLER:
+    return pplayer->score.units_killed >= ach->value;
   case ACHIEVEMENT_COUNT:
     break;
   }
@@ -381,7 +383,7 @@ bool achievement_claimed(const struct achievement *pach)
 **************************************************************************/
 int get_literacy(const struct player *pplayer)
 {
-  int pop = civ_population(pplayer);
+  int pop = pplayer->score.population;
 
   if (pop <= 0) {
     return 0;

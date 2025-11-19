@@ -8,9 +8,9 @@
 ; use your new customized file.
 
 [datafile]
-description="Granularity technology data for Freeciv"
-options="+Freeciv-ruleset-Devel-2017.Jan.02"
-format_version=20
+description = "Granularity technology data for Freeciv"
+options = "+Freeciv-ruleset-3.2-Devel-2022.Feb.02"
+format_version = 30
 
 [control]
 ; Names for custom tech flags. There can be up to 8 of these.
@@ -78,7 +78,7 @@ format_version=20
 ;                 tech requirements because it is a requirement vector.
 ;                 See doc/README.effects to learn more about requirement
 ;                 vectors.
-;                 Requireing a tech here in stead of in req1, req2 or
+;                 Requiring a tech here instead of in req1, req2 or
 ;                 root_req is not supported yet.
 ;                 Requirements that may become fulfilled during the game
 ;                 when they weren't at the start of the game is not
@@ -102,9 +102,10 @@ format_version=20
 ; possible:
 ;
 ; "Bonus_Tech"          = player gets extra tech if reached first
-; "Bridge"              = "Settler" unit types can build roads with
-;                         "RequiresBridge" flag over roads with
-;                         "PreventsOtherRoads" flag (rivers)
+; "Bridge"              = "Settler" unit types can build extras that
+;                         require bridge when occurring with some other
+;                         extra. See "bridged_over" extra property in
+;                         terrain.ruleset.
 ; "Build_Airborne"      = from now on can build air units (for use by AI)
 ; "Claim_Ocean"         = Player claims ocean tiles even if they are not
 ;                         adjacent to border source
@@ -113,36 +114,63 @@ format_version=20
 ;
 ; */ <-- avoid gettext warnings
 
-[advance_carving]
-name        = _("Carving");
+[advance_agriculture]
+name        = _("Agriculture")
 req1        = "Tools"
 req2        = "None"
 flags       = ""
+graphic     = "a.agriculture"
+graphic_alt = "-"
+helptext    = _("Agriculture allows placing irrigation.")
+
+[advance_animal_taming]
+name        = _("Animal Taming")
+req1        = "Cave Painting"
+req2        = "None"
+flags       = ""
+graphic     = "a.animal_taming"
+graphic_alt = "-"
+;helptext    =
+
+[advance_carving]
+name        = _("Carving")
+req1        = "Tools"
+req2        = "Fire"
+flags       = ""
 graphic     = "a.carving"
 graphic_alt = "-"
-helptext    = _("Boats can be carved from wood.");
+helptext    = _("Boats can be carved from wood.")
 
 [advance_cave_painting]
-name        = _("Cave Painting");
+name        = _("Cave Painting")
 req1        = "None"
 req2        = "None"
 flags       = ""
 graphic     = "a.cave_painting"
 graphic_alt = "a.alphabet"
-helptext    = _("Cave Paintings record hunting and fights.");
+helptext    = _("Cave Paintings record hunting and fights.")
 
 [advance_fire]
-name        = _("Fire");
+name        = _("Fire")
 req1        = "None"
 req2        = "None"
 flags       = ""
 graphic     = "a.fire"
 graphic_alt = "-"
 helptext    = _("With fire, there can be a place to live permanently.\
- Allows settlements to grow to size 6.");
+ Allows settlements to grow to size 6.")
+
+[advance_fishing]
+name        = _("Fishing")
+req1        = "Tools"
+req2        = "None"
+flags       = ""
+graphic     = "a.fishing"
+graphic_alt = "-"
+helptext    = _("Makes it possible to use Oceanic tiles.")
 
 [advance_government]
-name        = _("Government");
+name        = _("Government")
 req1        = "Cave Painting"
 req2        = "None"
 flags       = ""
@@ -150,13 +178,63 @@ graphic     = "a.government"
 graphic_alt = "-"
 helptext    = _("Knowing basics of governing your people lets you\
  adjust tax/science/luxury rates more freely.\
-");
+")
+
+[advance_horseback_riding]
+name        = _("Horseback Riding")
+req1        = "Animal Taming"
+req2        = "None"
+flags       = ""
+graphic     = "a.horseback_riding"
+graphic_alt = "-"
+;helptext    =
+
+[advance_masonry]
+name        = _("Masonry")
+req1        = "Road Building"
+req2        = "None"
+flags       = ""
+graphic     = "a.masonry"
+graphic_alt = "-"
+;helptext    =
+
+[advance_pottery]
+name        = _("Pottery")
+req1        = "Fire"
+req2        = "None"
+flags       = ""
+graphic     = "a.pottery"
+graphic_alt = "-"
+; /* xgettext:no-c-format */
+helptext    = _("\
+As food can be stored, granary is set to 15% full when city grows.\
+")
+
+[advance_road_building]
+name        = _("Road Building")
+req1        = "None"
+req2        = "None"
+flags       = ""
+graphic     = "a.road_building"
+graphic_alt = "-"
+helptext    = _("Allows build actual roads.")
+
+[advance_spirits]
+name        = _("Spirits")
+req1        = "None"
+req2        = "None"
+flags       = ""
+graphic     = "a.spirits"
+graphic_alt = "a.alphabet"
+helptext    = _("Belief in natural spirits is the first step in Religious\
+ tech tree branch.")
 
 [advance_tools]
-name        = _("Tools");
+name        = _("Tools")
 req1        = "None"
 req2        = "None"
 flags       = ""
 graphic     = "a.tools"
 graphic_alt = "-"
-helptext    = _("Anything can be done with right tools.");
+helptext    = _("Anything can be done with right tools.\
+ Allows more efficient use of production resources.")

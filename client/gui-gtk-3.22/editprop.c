@@ -33,6 +33,7 @@
 #include "government.h"
 #include "map.h"
 #include "movement.h"
+#include "nation.h"
 #include "research.h"
 #include "tile.h"
 
@@ -91,7 +92,7 @@ static int get_next_unique_tag(void);
 #include "spechash.h"
 
 /* NB: If packet definitions change, be sure to
- * update objbind_pack_current_values!!! */
+ * update objbind_pack_current_values()!!! */
 union packetdata {
   struct {
     gpointer v_pointer1;
@@ -219,7 +220,7 @@ static const char *valtype_get_name(enum value_types valtype);
   To add a new member to union propval_data, see the steps for adding a
   new value type above.
 
-  New property values are "constructed" by objbind_get_value_from_object.
+  New property values are "constructed" by objbind_get_value_from_object().
 ****************************************************************************/
 union propval_data {
   gpointer v_pointer;
@@ -288,7 +289,7 @@ static struct propval *propstate_get_value(struct propstate *ps);
   6. Add a case handler in objbind_pack_modified_value.
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !!! 7. Add code to set the packet field in  !!!
-  !!!    objbind_pack_current_values.         !!!
+  !!!    objbind_pack_current_values().       !!!
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   8. Add code to handle changes in the packet field in
      server/edithand.c handle_edit_<objtype>.
@@ -363,6 +364,7 @@ enum object_property_ids {
 #endif /* FREECIV_DEBUG */
   OPID_PLAYER_INVENTIONS,
   OPID_PLAYER_SCENARIO_RESERVED,
+  OPID_PLAYER_SELECT_WEIGHT,
   OPID_PLAYER_SCIENCE,
   OPID_PLAYER_GOLD,
 
@@ -477,7 +479,7 @@ static bool objbind_get_allowed_value_span(struct objbind *ob,
                                            double *pmax,
                                            double *pstep,
                                            double *pbig_step);
-static void objbind_set_modified_value(struct objbind *ob,
+static bool objbind_set_modified_value(struct objbind *ob,
                                        struct objprop *op,
                                        struct propval *pv);
 static struct propval *objbind_get_modified_value(struct objbind *ob,
@@ -1187,9 +1189,10 @@ static bool propval_equal(struct propval *pva,
   case VALTYPE_BOOL:
     return pva->data.v_bool == pvb->data.v_bool;
   case VALTYPE_STRING:
-    if (pva->data.v_const_string && pvb->data.v_const_string) {
-      return 0 == strcmp(pva->data.v_const_string,
-                         pvb->data.v_const_string);
+    if (pva->data.v_const_string != NULL
+        && pvb->data.v_const_string != NULL) {
+      return !strcmp(pva->data.v_const_string,
+                     pvb->data.v_const_string);
     }
     return pva->data.v_const_string == pvb->data.v_const_string;
   case VALTYPE_PIXBUF:
@@ -1428,7 +1431,7 @@ static void objbind_request_destroy_object(struct objbind *ob)
   Returns a newly allocated property value for the given object property
   on the object referenced by the given object bind, or NULL on failure.
 
-  NB: You must call propval_free on the non-NULL return value when it
+  NB: You must call propval_free() on the non-NULL return value when it
   no longer needed.
 ****************************************************************************/
 static struct propval *objbind_get_value_from_object(struct objbind *ob,
@@ -1784,6 +1787,9 @@ static struct propval *objbind_get_value_from_object(struct objbind *ob,
       case OPID_PLAYER_SCENARIO_RESERVED:
         pv->data.v_bool = player_has_flag(pplayer, PLRF_SCENARIO_RESERVED);
         break;
+      case OPID_PLAYER_SELECT_WEIGHT:
+        pv->data.v_int = pplayer->autoselect_weight;
+        break;
       case OPID_PLAYER_SCIENCE:
         presearch = research_get(pplayer);
         pv->data.v_int = presearch->bulbs_researched;
@@ -2015,6 +2021,12 @@ static bool objbind_get_allowed_value_span(struct objbind *ob,
       *pstep = 1;
       *pbig_step = 100;
       return TRUE;
+    case OPID_PLAYER_SELECT_WEIGHT:
+      *pmin = -1;
+      *pmax = 10000; /* Keep it under SINT16 */
+      *pstep = 1;
+      *pbig_step = 10;
+      return TRUE;
     default:
       break;
     }
@@ -2097,8 +2109,10 @@ static void objbind_clear_all_modified_values(struct objbind *ob)
 /************************************************************************//**
   Store a modified property value, but only if it is different from the
   current value. Always makes a copy of the given value when storing.
+
+  Returns whether anything changed.
 ****************************************************************************/
-static void objbind_set_modified_value(struct objbind *ob,
+static bool objbind_set_modified_value(struct objbind *ob,
                                        struct objprop *op,
                                        struct propval *pv)
 {
@@ -2108,14 +2122,14 @@ static void objbind_set_modified_value(struct objbind *ob,
   enum object_property_ids propid;
 
   if (!ob || !op) {
-    return;
+    return FALSE;
   }
 
   propid = objprop_get_id(op);
 
   pv_old = objbind_get_value_from_object(ob, op);
   if (!pv_old) {
-    return;
+    return FALSE;
   }
 
   equal = propval_equal(pv, pv_old);
@@ -2123,7 +2137,7 @@ static void objbind_set_modified_value(struct objbind *ob,
 
   if (equal) {
     objbind_clear_modified_value(ob, op);
-    return;
+    return FALSE;
   }
 
   pv_copy = propval_copy(pv);
@@ -2134,6 +2148,8 @@ static void objbind_set_modified_value(struct objbind *ob,
     ps = propstate_new(op, pv_copy);
     propstate_hash_insert(ob->propstate_table, propid, ps);
   }
+
+  return TRUE;
 }
 
 /************************************************************************//**
@@ -2307,8 +2323,10 @@ static void objbind_pack_current_values(struct objbind *ob,
         packet->inventions[tech]
             = TECH_KNOWN == research_invention_state(presearch, tech);
       } advance_index_iterate_end;
+      packet->autoselect_weight = pplayer->autoselect_weight;
       packet->gold = pplayer->economic.gold;
       packet->government = government_index(pplayer->government);
+      packet->scenario_reserved = player_has_flag(pplayer, PLRF_SCENARIO_RESERVED);
       /* TODO: Set more packet fields. */
     }
     return;
@@ -2539,6 +2557,9 @@ static void objbind_pack_modified_value(struct objbind *ob,
         return;
       case OPID_PLAYER_SCENARIO_RESERVED:
         packet->scenario_reserved = pv->data.v_bool;
+        return;
+      case OPID_PLAYER_SELECT_WEIGHT:
+        packet->autoselect_weight = pv->data.v_int;
         return;
       case OPID_PLAYER_SCIENCE:
         packet->bulbs_researched = pv->data.v_int;
@@ -3002,6 +3023,7 @@ static void objprop_setup_widget(struct objprop *op)
   case OPID_CITY_SIZE:
   case OPID_CITY_HISTORY:
   case OPID_CITY_SHIELD_STOCK:
+  case OPID_PLAYER_SELECT_WEIGHT:
   case OPID_PLAYER_SCIENCE:
   case OPID_PLAYER_GOLD:
     spin = gtk_spin_button_new_with_range(0.0, 100.0, 1.0);
@@ -3110,8 +3132,8 @@ static void objprop_refresh_widget(struct objprop *op,
   propid = objprop_get_id(op);
 
   /* NB: We must take care to propval_free the return value of
-   * objbind_get_value_from_object, since it always makes a
-   * copy, but to NOT free the result of objbind_get_modified_value
+   * objbind_get_value_from_object(), since it always makes a
+   * copy, but to NOT free the result of objbind_get_modified_value()
    * since it returns its own stored value. */
   pv = objbind_get_value_from_object(ob, op);
   modified = objbind_property_is_modified(ob, op);
@@ -3205,6 +3227,7 @@ static void objprop_refresh_widget(struct objprop *op,
   case OPID_CITY_SIZE:
   case OPID_CITY_HISTORY:
   case OPID_CITY_SHIELD_STOCK:
+  case OPID_PLAYER_SELECT_WEIGHT:
   case OPID_PLAYER_SCIENCE:
   case OPID_PLAYER_GOLD:
     spin = objprop_get_child_widget(op, "spin");
@@ -3991,7 +4014,7 @@ static void extviewer_refresh_widgets(struct extviewer *ev,
 
   case OPID_PLAYER_INVENTIONS:
     gtk_list_store_clear(store);
-    advance_iterate(A_FIRST, padvance) {
+    advance_iterate(padvance) {
       id = advance_index(padvance);
       present = BV_ISSET(pv->data.v_bv_inventions, id);
       name = advance_name_translation(padvance);
@@ -4523,6 +4546,10 @@ static void property_page_setup_objprops(struct property_page *pp)
             VALTYPE_INVENTIONS_ARRAY);
     ADDPROP(OPID_PLAYER_SCENARIO_RESERVED, _("Reserved"), NULL,
             OPF_HAS_WIDGET | OPF_EDITABLE, VALTYPE_BOOL);
+    ADDPROP(OPID_PLAYER_SELECT_WEIGHT, _("Select Weight"),
+            _("How likely user is to get this player by autoselect. '-1' for default behavior."),
+            OPF_HAS_WIDGET | OPF_EDITABLE,
+            VALTYPE_INT);
     ADDPROP(OPID_PLAYER_SCIENCE, _("Science"), NULL,
             OPF_HAS_WIDGET | OPF_EDITABLE, VALTYPE_INT);
     ADDPROP(OPID_PLAYER_GOLD, _("Gold"), NULL,
@@ -5445,6 +5472,7 @@ static void property_page_change_value(struct property_page *pp,
   GtkTreePath *path;
   GtkTreeIter iter;
   struct objbind *ob;
+  bool changed = FALSE;
 
   if (!pp || !op || !pp->object_view) {
     return;
@@ -5461,14 +5489,16 @@ static void property_page_change_value(struct property_page *pp,
     path = p->data;
     if (gtk_tree_model_get_iter(model, &iter, path)) {
       gtk_tree_model_get(model, &iter, 0, &ob, -1);
-      objbind_set_modified_value(ob, op, pv);
+      changed |= objbind_set_modified_value(ob, op, pv);
     }
     gtk_tree_path_free(path);
   }
   g_list_free(rows);
 
-  ob = property_page_get_focused_objbind(pp);
-  objprop_refresh_widget(op, ob);
+  if (changed) {
+    ob = property_page_get_focused_objbind(pp);
+    objprop_refresh_widget(op, ob);
+  }
 }
 
 /************************************************************************//**

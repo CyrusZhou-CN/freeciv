@@ -53,13 +53,13 @@
  *
  * Unlike the original CM code, which used a dynamic programming approach,
  * this code uses a branch-and-bound approach.  The DP approach allowed
- * cacheing, but it was hard to guarantee the correctness of the cache, so
+ * caching, but it was hard to guarantee the correctness of the cache, so
  * it was usually tossed and recomputed.
  *
  * The B&B approach also allows a very simple greedy search, whereas the DP
  * approach required a lot of pre-computing.  And, it appears to be very
  * slightly faster.  It evaluates about half as many solutions, but each
- * candidate solution is more expensive due to the lack of cacheing.
+ * candidate solution is more expensive due to the lack of caching.
  *
  * We use highly specific knowledge about how the city computes its stats
  * in two places:
@@ -72,8 +72,12 @@
   Defines, structs, globals, forward declarations
 *****************************************************************************/
 
-/* Maximal iterations before the search loop is stoped. */
-#define CM_MAX_LOOP 25000
+/* If this is uncommented, research loop runs without limit on iterations. */
+/* #define CM_LOOP_NO_LIMIT */
+
+/* Maximal iterations before the search loop is stopped, or until warning is
+ * printed if CM_LOOP_NO_LIMIT is defined. */
+#define CM_MAX_LOOP 27500
 
 #define CPUHOG_CM_MAX_LOOP (CM_MAX_LOOP * 4)
 
@@ -292,10 +296,12 @@ void cm_init(void)
 #ifdef GATHER_TIME_STATS
   memset(&performance, 0, sizeof(performance));
 
-  performance.greedy.wall_timer = timer_new(TIMER_USER, TIMER_ACTIVE);
+  performance.greedy.wall_timer = timer_new(TIMER_USER, TIMER_ACTIVE,
+                                            "cm.greedy");
   performance.greedy.name = "greedy";
 
-  performance.opt.wall_timer = timer_new(TIMER_USER, TIMER_ACTIVE);
+  performance.opt.wall_timer = timer_new(TIMER_USER, TIMER_ACTIVE,
+                                         "cm.opt");
   performance.opt.name = "opt";
 #endif /* GATHER_TIME_STATS */
 }
@@ -677,7 +683,10 @@ static void apply_solution(struct cm_state *state,
                            const struct partial_solution *soln)
 {
   struct city *pcity = state->pcity;
-  int i, citizen_count = 0, city_radius_sq = city_map_radius_sq_get(pcity);
+  int i, city_radius_sq = city_map_radius_sq_get(pcity);
+#ifndef FREECIV_NDEBUG
+  int citizen_count = 0;
+#endif
 
 #ifdef GATHER_TIME_STATS
   performance.current->apply_count++;
@@ -708,7 +717,9 @@ static void apply_solution(struct cm_state *state,
       /* No citizens of this type. */
       continue;
     }
+#ifndef FREECIV_NDEBUG
     citizen_count += nworkers;
+#endif
 
     type = tile_type_get(state, i);
 
@@ -734,7 +745,7 @@ static void apply_solution(struct cm_state *state,
 
 /************************************************************************//**
   Convert the city's surplus numbers into an array. Get the happy/disorder
-  values, too. This fills in the surplus array and disorder and happy 
+  values, too. This fills in the surplus array and disorder and happy
   values based on the city's data.
 ****************************************************************************/
 static void get_city_surplus(const struct city *pcity,
@@ -779,9 +790,9 @@ static struct cm_fitness evaluate_solution(struct cm_state *state,
     int specialists_amount = city_specialists(pcity);
     int max_content = player_content_citizens(city_owner(pcity));
 
-    state->min_luxury = surplus[O_LUXURY] 
+    state->min_luxury = surplus[O_LUXURY]
       + game.info.happy_cost * MAX(specialists_amount - max_content, 0)
-       + 1;
+      + 1;
   }
 
   return compute_fitness(surplus, disorder, happy, &state->parameter);
@@ -897,18 +908,18 @@ static int compare_tile_type_by_stat(const void *va, const void *vb)
     return 0;
   }
 
-  /* consider the influence of trade on science, luxury, gold
+  /* Consider the influence of trade on science, luxury, gold
      for compute_max_stats_heuristics, which uses these sorted arrays,
-     it is essential, that the sorting is correct, else promising 
+     it is essential, that the sorting is correct, else promising
      branches get pruned */
-  double valuea = (*a)->production[compare_key] + 
+  double valuea = (*a)->production[compare_key] +
                     compare_key_trade_bonus * (*a)->production[O_TRADE];
   double valueb = (*b)->production[compare_key] +
                     compare_key_trade_bonus * (*b)->production[O_TRADE];
 
-  /* most production of what we care about goes first */
-  /* double compare is ok, both values are calculated in the same way
-     and should only be considered equal, if equal in compare_key 
+  /* Most production of what we care about goes first */
+  /* Double compare is ok, both values are calculated in the same way
+     and should only be considered equal, if equal in compare_key
      and O_TRADE */
   if (valuea != valueb) {
     /* b-a so we sort big numbers first */
@@ -991,7 +1002,7 @@ static void tile_type_lattice_add(struct tile_type_vector *lattice,
  */
 
 /************************************************************************//**
-  Create lattice nodes for each type of specialist.  This adds a new
+  Create lattice nodes for each type of specialist. This adds a new
   tile_type for each specialist type.
 ****************************************************************************/
 static void init_specialist_lattice_nodes(struct tile_type_vector *lattice,
@@ -1025,83 +1036,85 @@ static void init_specialist_lattice_nodes(struct tile_type_vector *lattice,
 ****************************************************************************/
 static void top_sort_lattice(struct tile_type_vector *lattice)
 {
-  int i;
-  bool marked[lattice->size];
-  bool will_mark[lattice->size];
-  struct tile_type_vector vectors[2];
-  struct tile_type_vector *current, *next;
+  if (lattice->size > 0) {
+    int i;
+    bool marked[lattice->size];
+    bool will_mark[lattice->size];
+    struct tile_type_vector vectors[2];
+    struct tile_type_vector *current, *next;
 
-  memset(marked, 0, sizeof(marked));
-  memset(will_mark, 0, sizeof(will_mark));
+    memset(marked, 0, sizeof(marked));
+    memset(will_mark, 0, sizeof(will_mark));
 
-  tile_type_vector_init(&vectors[0]);
-  tile_type_vector_init(&vectors[1]);
-  current = &vectors[0];
-  next = &vectors[1];
+    tile_type_vector_init(&vectors[0]);
+    tile_type_vector_init(&vectors[1]);
+    current = &vectors[0];
+    next = &vectors[1];
 
-  /* fill up 'next' */
-  tile_type_vector_iterate(lattice, ptype) {
-    if (tile_type_num_prereqs(ptype) == 0) {
-      tile_type_vector_append(next, ptype);
-    }
-  } tile_type_vector_iterate_end;
-
-  /* while we have nodes to process: mark the nodes whose prereqs have
-   * all been visited.  Then, store all the new nodes on the frontier. */
-  while (next->size != 0) {
-    /* what was the next frontier is now the current frontier */
-    struct tile_type_vector *vtmp = current;
-
-    current = next;
-    next = vtmp;
-    next->size = 0; /* clear out the contents */
-
-    /* look over the current frontier and process everyone */
-    tile_type_vector_iterate(current, ptype) {
-      /* see if all prereqs were marked.  If so, decide to mark this guy,
-         and put all the descendents on 'next'.  */
-      bool can_mark = TRUE;
-      int sumdepth = 0;
-
-      if (will_mark[ptype->lattice_index]) {
-        continue; /* we've already been processed */
-      }
-      tile_type_vector_iterate(&ptype->better_types, better) {
-        if (!marked[better->lattice_index]) {
-          can_mark = FALSE;
-          break;
-        } else {
-          sumdepth += tile_type_num_tiles(better);
-          if (sumdepth >= FC_INFINITY) {
-            /* if this is the case, then something better could
-               always be used, and the same holds for our children */
-            sumdepth = FC_INFINITY;
-            can_mark = TRUE;
-            break;
-          }
-        }
-      } tile_type_vector_iterate_end;
-      if (can_mark) {
-        /* mark and put successors on the next frontier */
-        will_mark[ptype->lattice_index] = TRUE;
-        tile_type_vector_iterate(&ptype->worse_types, worse) {
-          tile_type_vector_append(next, worse);
-        } tile_type_vector_iterate_end;
-
-        /* this is what we spent all this time computing. */
-        ptype->lattice_depth = sumdepth;
+    /* Fill up 'next' */
+    tile_type_vector_iterate(lattice, ptype) {
+      if (tile_type_num_prereqs(ptype) == 0) {
+        tile_type_vector_append(next, ptype);
       }
     } tile_type_vector_iterate_end;
 
-    /* now, actually mark everyone and get set for next loop */
-    for (i = 0; i < lattice->size; i++) {
-      marked[i] = marked[i] || will_mark[i];
-      will_mark[i] = FALSE;
-    }
-  }
+    /* While we have nodes to process: mark the nodes whose prereqs have
+     * all been visited. Then, store all the new nodes on the frontier. */
+    while (next->size != 0) {
+      /* What was the next frontier is now the current frontier */
+      struct tile_type_vector *vtmp = current;
 
-  tile_type_vector_free(&vectors[0]);
-  tile_type_vector_free(&vectors[1]);
+      current = next;
+      next = vtmp;
+      next->size = 0; /* Clear out the contents */
+
+      /* Look over the current frontier and process everyone */
+      tile_type_vector_iterate(current, ptype) {
+        /* See if all prereqs were marked. If so, decide to mark this guy,
+           and put all the descendents on 'next'.  */
+        bool can_mark = TRUE;
+        int sumdepth = 0;
+
+        if (will_mark[ptype->lattice_index]) {
+          continue; /* We've already been processed */
+        }
+        tile_type_vector_iterate(&ptype->better_types, better) {
+          if (!marked[better->lattice_index]) {
+            can_mark = FALSE;
+            break;
+          } else {
+            sumdepth += tile_type_num_tiles(better);
+            if (sumdepth >= FC_INFINITY) {
+              /* If this is the case, then something better could
+                 always be used, and the same holds for our children */
+              sumdepth = FC_INFINITY;
+              can_mark = TRUE;
+              break;
+            }
+          }
+        } tile_type_vector_iterate_end;
+        if (can_mark) {
+          /* Mark and put successors on the next frontier */
+          will_mark[ptype->lattice_index] = TRUE;
+          tile_type_vector_iterate(&ptype->worse_types, worse) {
+            tile_type_vector_append(next, worse);
+          } tile_type_vector_iterate_end;
+
+          /* This is what we spent all this time computing. */
+          ptype->lattice_depth = sumdepth;
+        }
+      } tile_type_vector_iterate_end;
+
+      /* Now, actually mark everyone and get set for next loop */
+      for (i = 0; i < lattice->size; i++) {
+        marked[i] = marked[i] || will_mark[i];
+        will_mark[i] = FALSE;
+      }
+    }
+
+    tile_type_vector_free(&vectors[0]);
+    tile_type_vector_free(&vectors[1]);
+  }
 }
 
 /************************************************************************//**
@@ -1111,9 +1124,9 @@ static void top_sort_lattice(struct tile_type_vector *lattice)
   we can never use.
 
   A node is unreachable if there are fewer available workers
-  than are needed to fill up all predecessors.  A node at depth
+  than are needed to fill up all predecessors. A node at depth
   two needs three workers to be reachable, for example (two to fill
-  the predecessors, and one for the tile).  We remove a node if
+  the predecessors, and one for the tile). We remove a node if
   its depth is equal to the city size, or larger.
 
   We could clean up the tile arrays in each type (if we have two workers,
@@ -1127,7 +1140,7 @@ static void clean_lattice(struct tile_type_vector *lattice,
   struct tile_type_vector tofree;
   bool forced_loop = FALSE;
 
-  /* We collect the types we want to remove and free them in one fell 
+  /* We collect the types we want to remove and free them in one fell
      swoop at the end, in order to avoid memory errors.  */
   tile_type_vector_init(&tofree);
 
@@ -1139,10 +1152,11 @@ static void clean_lattice(struct tile_type_vector *lattice,
   }
   for (i = 0, j = 0; i < lattice->size || forced_loop; i++) {
     struct cm_tile_type *ptype = lattice->p[i];
+    citizens csize = city_size_get(pcity);
 
     forced_loop = FALSE;
 
-    if (ptype->lattice_depth >= city_size_get(pcity)) {
+    if (ptype->lattice_depth >= csize) {
       tile_type_vector_append(&tofree, ptype);
     } else {
       /* Remove links to children that are being removed. */
@@ -1156,7 +1170,7 @@ static void clean_lattice(struct tile_type_vector *lattice,
       for (ci = 0, cj = 0; ci < ptype->worse_types.size; ci++) {
         const struct cm_tile_type *ptype2 = ptype->worse_types.p[ci];
 
-        if (ptype2->lattice_depth < city_size_get(pcity)) {
+        if (ptype2->lattice_depth < csize) {
           ptype->worse_types.p[cj] = ptype->worse_types.p[ci];
           cj++;
         }
@@ -1570,7 +1584,7 @@ static void compute_max_stats_heuristic(const struct cm_state *state,
 
   } else {
 
-    /* initialize solnplus here, after the shortcut check */
+    /* Initialize solnplus here, after the shortcut check */
     init_partial_solution(&solnplus, num_types(state),
                           city_size_get(state->pcity),
                           negative_ok);
@@ -1589,10 +1603,10 @@ static void compute_max_stats_heuristic(const struct cm_state *state,
 
   }
 
-  /* we found the basic production, however, bonus, taxes, 
+  /* we found the basic production, however, bonus, taxes,
      free production, tithes, traderoutes are missing
      we add free production, and have the city.c code do the rest */
-  
+
   struct city *pcity = state->pcity;
   struct tile *pcenter = city_tile(pcity);
   bool is_celebrating = base_city_celebrating(pcity);
@@ -1644,8 +1658,8 @@ static bool choice_is_promising(struct cm_state *state, int newchoice,
        * don't short-circuit */
     }
   } output_type_iterate_end;
- 
-  /* If we don't get the city content, we assume using every idle worker 
+
+  /* If we don't get the city content, we assume using every idle worker
      as specialist and the maximum producible luxury already computed.
      If this is less than the amount of luxury we calculated in
      evaluate_solution() (where min_luxury is set), when we observed the
@@ -1665,7 +1679,7 @@ static bool choice_is_promising(struct cm_state *state, int newchoice,
 
     if (max_luxury < state->min_luxury ) {
       log_base(LOG_PRUNE_BRANCH, "--- pruning: disorder (%d + %d*%d < %d)",
-               production[O_LUXURY], 
+               production[O_LUXURY],
                game.info.happy_cost,
                specialists_suppress_unhappy,
                state->min_luxury);
@@ -1826,9 +1840,10 @@ static struct cm_state *cm_state_init(struct city *pcity, bool negative_ok)
   int numtypes;
   struct cm_state *state = fc_malloc(sizeof(*state));
   int rates[3];
+  citizens csize = city_size_get(pcity);
 
   log_base(LOG_CM_STATE, "creating cm_state for %s (size %d)",
-           city_name_get(pcity), city_size_get(pcity));
+           city_name_get(pcity), csize);
 
   /* copy the arguments */
   state->pcity = pcity;
@@ -1842,11 +1857,14 @@ static struct cm_state *cm_state_init(struct city *pcity, bool negative_ok)
 
   /* For the heuristic, make sorted copies of the lattice */
   output_type_iterate(stat_index) {
-    tile_type_vector_init(&state->lattice_by_prod[stat_index]);
-    tile_type_vector_copy(&state->lattice_by_prod[stat_index], &state->lattice);
-    compare_key = stat_index;
-    /* calculate effect of 1 trade production on interesting production */
-    switch (stat_index) {
+    int lsize = tile_type_vector_size(&state->lattice);
+
+    if (lsize > 0) {
+      tile_type_vector_init(&state->lattice_by_prod[stat_index]);
+      tile_type_vector_copy(&state->lattice_by_prod[stat_index], &state->lattice);
+      compare_key = stat_index;
+      /* Calculate effect of 1 trade production on interesting production */
+      switch (stat_index) {
       case O_SCIENCE:
         compare_key_trade_bonus = rates[SCIENCE] * pcity->bonus[O_TRADE] / 100.0;
         break;
@@ -1859,24 +1877,22 @@ static struct cm_state *cm_state_init(struct city *pcity, bool negative_ok)
       default:
         compare_key_trade_bonus = 0.0;
         break;
+      }
+      qsort(state->lattice_by_prod[stat_index].p, lsize,
+            sizeof(*state->lattice_by_prod[stat_index].p),
+            compare_tile_type_by_stat);
     }
-    qsort(state->lattice_by_prod[stat_index].p, state->lattice_by_prod[stat_index].size,
-          sizeof(*state->lattice_by_prod[stat_index].p),
-          compare_tile_type_by_stat);
   } output_type_iterate_end;
 
   state->min_luxury = - FC_INFINITY;
 
   /* We have no best solution yet, so its value is the worst possible. */
-  init_partial_solution(&state->best, numtypes, city_size_get(pcity),
-                        negative_ok);
+  init_partial_solution(&state->best, numtypes, csize, negative_ok);
   state->best_value = worst_fitness();
 
   /* Initialize the current solution and choice stack to empty */
-  init_partial_solution(&state->current, numtypes, city_size_get(pcity),
-                        negative_ok);
-  state->choice.stack = fc_malloc(city_size_get(pcity)
-                                  * sizeof(*state->choice.stack));
+  init_partial_solution(&state->current, numtypes, csize, negative_ok);
+  state->choice.stack = fc_malloc(csize * sizeof(*state->choice.stack));
   state->choice.size = 0;
 
   /* Initialize workers map */
@@ -1884,6 +1900,56 @@ static struct cm_state *cm_state_init(struct city *pcity, bool negative_ok)
                                  sizeof(state->workers_map));
 
   return state;
+}
+
+/************************************************************************//**
+  Find the minimum food surplus needed to grow in the fewest number of turns.
+****************************************************************************/
+static int min_food_surplus_for_fastest_growth(struct cm_state *state)
+{
+  struct city *pcity = state->pcity;
+  int city_radius_sq = city_map_radius_sq_get(pcity);
+  citizens city_size = city_size_get(pcity);
+  int max_surplus = -game.info.food_cost * city_size;
+  bool is_celebrating = base_city_celebrating(pcity);
+  citizens workers = city_size;
+  int food_needed = city_granary_size(city_size) - pcity->food_stock;
+  int min_turns;
+
+  city_map_iterate(city_radius_sq, cindex, x, y) {
+    struct tile *ptile = city_map_to_tile(pcity->tile, city_radius_sq, x, y);
+    if (!ptile) {
+      continue;
+    }
+    if (is_free_worked_index(cindex)) {
+      max_surplus += city_tile_output(pcity, ptile, is_celebrating, O_FOOD);
+    }
+  } city_map_iterate_end;
+
+  if (max_surplus <= 0) {
+    return max_surplus;
+  }
+
+  if (food_needed <= 0) {
+    return 0;
+  }
+
+  tile_type_vector_iterate(&state->lattice_by_prod[O_FOOD], ptype) {
+    int num = tile_vector_size(&ptype->tiles);
+
+    if (ptype->is_specialist || workers < num) {
+      max_surplus += workers * ptype->production[O_FOOD];
+      break;
+    }
+    max_surplus += num * ptype->production[O_FOOD];
+    workers -= num;
+  } tile_type_vector_iterate_end;
+
+  /* min_turns will always be positive because if food_needed or
+   * max_surplus are non-positive, this function returns earlier. */
+  min_turns = (food_needed + max_surplus - 1) / max_surplus;
+
+  return (food_needed + min_turns - 1) / min_turns;
 }
 
 /************************************************************************//**
@@ -1902,9 +1968,15 @@ static void begin_search(struct cm_state *state,
   /* copy the parameter and sort the main lattice by it */
   cm_copy_parameter(&state->parameter, parameter);
   sort_lattice_by_fitness(state, &state->lattice);
+
+  if (parameter->max_growth) {
+    state->parameter.minimal_surplus[O_FOOD] =
+        min_food_surplus_for_fastest_growth(state);
+  }
+
   init_min_production(state);
 
-  /* clear out the old solution */
+  /* Clear out the old solution */
   state->best_value = worst_fitness();
   destroy_partial_solution(&state->current);
   init_partial_solution(&state->current, num_types(state),
@@ -1963,8 +2035,8 @@ static void cm_find_best_solution(struct cm_state *state,
 #endif
 
   begin_search(state, parameter, negative_ok);
-  
-  /* make a backup of the city to restore at the very end */
+
+  /* Make a backup of the city to restore at the very end */
   memcpy(&backup, state->pcity, sizeof(backup));
 
   if (player_is_cpuhog(city_owner(state->pcity))) {
@@ -1980,13 +2052,27 @@ static void cm_find_best_solution(struct cm_state *state,
     /* Limit the number of loops. */
     loop_count++;
 
-    if (loop_count > max_count) {
-      log_error("Did not find a cm solution in %d iterations for %s.",
-                max_count, city_name_get(state->pcity));
+    if (loop_count == max_count + 1) {
+      log_base(
+#ifdef FREECIV_TESTMATIC
+               LOG_DEBUG,
+#else  /* FREECIV_TESTMATIC */
+               LOG_WARN,
+#endif /* FREECIV_TESTMATIC */
+               "Did not find a cm solution in %d iterations for %s.",
+               max_count, city_name_get(state->pcity));
+#ifndef CM_LOOP_NO_LIMIT
       result->aborted = TRUE;
       break;
+#endif /* CM_LOOP_NO_LIMIT */
     }
   }
+
+#ifdef CM_LOOP_NO_LIMIT
+  if (loop_count > max_count) {
+    log_warn("It took %d iterations to finish.", loop_count);
+  }
+#endif /* CM_LOOP_NO_LIMIT */
 
   /* convert to the caller's format */
   convert_solution_to_result(state, &state->best, result);
@@ -2041,6 +2127,9 @@ bool cm_are_parameter_equal(const struct cm_parameter *const p1,
   if (p1->happy_factor != p2->happy_factor) {
     return FALSE;
   }
+  if (p1->max_growth != p2->max_growth) {
+    return FALSE;
+  }
 
   return TRUE;
 }
@@ -2068,6 +2157,7 @@ void cm_init_parameter(struct cm_parameter *dest)
   dest->require_happy = FALSE;
   dest->allow_disorder = FALSE;
   dest->allow_specialists = TRUE;
+  dest->max_growth = FALSE;
 }
 
 /************************************************************************//**
@@ -2085,6 +2175,7 @@ void cm_init_emergency_parameter(struct cm_parameter *dest)
   dest->require_happy = FALSE;
   dest->allow_disorder = TRUE;
   dest->allow_specialists = TRUE;
+  dest->max_growth = FALSE;
 }
 
 /************************************************************************//**

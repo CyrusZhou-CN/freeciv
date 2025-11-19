@@ -1,6 +1,7 @@
 ## Process this file with automake to produce Makefile.in
 
 MAN_PAGES = 			\
+	freeciv.6       	\
 	freeciv-server.6	\
 	freeciv-client.6	\
 	freeciv-modpack.6	\
@@ -9,11 +10,12 @@ MAN_PAGES = 			\
 	freeciv-ruleup.6
 
 MAN_LINKS = 			\
-	freeciv-gtk3.6		\
 	freeciv-gtk3.22.6	\
+	freeciv-gtk4.6		\
 	freeciv-sdl2.6		\
 	freeciv-qt.6		\
 	freeciv-mp-gtk3.6	\
+	freeciv-mp-gtk4.6	\
 	freeciv-mp-qt.6		\
 	freeciv-mp-cli.6
 

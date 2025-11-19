@@ -20,14 +20,15 @@
 #include "actions.h"
 #include "fc_types.h"
 #include "featured_text.h"      /* struct text_tag_list */
-#include "nation.h"		/* Nation_type_id */
-#include "terrain.h"		/* enum tile_special_type */
+#include "nation.h"             /* Nation_type_id */
+#include "terrain.h"            /* enum tile_special_type */
 #include "unitlist.h"
 
 /* client */
 #include "gui_proto_constructor.h"
 
 struct packet_nations_selected_info;
+struct act_confirmation_data;
 
 GUI_FUNC_PROTO(void, popup_notify_goto_dialog, const char *headline,
                const char *lines,
@@ -80,13 +81,15 @@ GUI_FUNC_PROTO(void, popup_soundset_suggestion_dialog, void)
 GUI_FUNC_PROTO(void, popup_musicset_suggestion_dialog, void)
 GUI_FUNC_PROTO(bool, popup_theme_suggestion_dialog, const char *theme_name)
 GUI_FUNC_PROTO(void, show_tech_gained_dialog, Tech_type_id tech)
-GUI_FUNC_PROTO(void, show_tileset_error, const char *msg)
+GUI_FUNC_PROTO(void, show_tileset_error, const char *tset_name, const char *msg)
 GUI_FUNC_PROTO(bool, handmade_scenario_warning, void)
 
 GUI_FUNC_PROTO(void, popdown_all_game_dialogs, void)
 
 GUI_FUNC_PROTO(bool, request_transport, struct unit *pcargo, struct tile *ptile)
+GUI_FUNC_PROTO(void, request_action_confirmation, const char *expl,
+               struct act_confirmation_data *data)
 
 GUI_FUNC_PROTO(void, update_infra_dialog, void)
 
-#endif  /* FC__DIALOGS_G_H */
+#endif /* FC__DIALOGS_G_H */

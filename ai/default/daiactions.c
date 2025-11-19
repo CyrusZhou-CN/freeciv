@@ -17,6 +17,7 @@
 
 /* common */
 #include "city.h"
+#include "metaknowledge.h"
 #include "movement.h"
 #include "player.h"
 #include "research.h"
@@ -67,7 +68,7 @@ choose_tech_to_steal(const struct player *actor_player,
 
   if (actor_research != target_research) {
     if (can_see_techs_of_target(actor_player, target_player)) {
-      advance_iterate(A_FIRST, padvance) {
+      advance_iterate(padvance) {
         Tech_type_id i = advance_number(padvance);
 
         if (research_invention_state(target_research, i) == TECH_KNOWN
@@ -108,6 +109,7 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
    * support other actions. */
 
   adv_want utility;
+  bool expected_kills;
 
   struct player *actor_player = unit_owner(actor_unit);
   struct player *target_player = city_owner(target_city);
@@ -117,30 +119,32 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
 
   utility = 0;
 
+  /* If tech theft is impossible when expected. */
+  expected_kills = utype_is_consumed_by_action(paction,
+                                               unit_type_get(actor_unit));
+
   /* The unit was always spent */
   utility += unit_build_shield_cost_base(actor_unit) + 1;
 
-  if (action_has_result(paction, ACTION_ESTABLISH_EMBASSY_STAY)
-      || action_has_result(paction, ACTION_ESTABLISH_EMBASSY)) {
+  if (action_has_result(paction, ACTRES_ESTABLISH_EMBASSY)) {
     utility += 10000;
   }
 
   if (!pplayers_allied(actor_player, target_player)
       && count_tech > 0
-      && (action_has_result(paction, ACTION_SPY_STEAL_TECH_ESC)
-          || ((diplomats_unignored_tech_stealings(actor_unit, target_city)
-               == 0)
-              && action_has_result(paction, ACTION_SPY_STEAL_TECH)))) {
+      && (!expected_kills
+          || (diplomats_unignored_tech_stealings(actor_unit, target_city)
+              == 0))
+      && action_has_result(paction, ACTRES_SPY_STEAL_TECH)) {
     utility += 9000;
   }
 
   if (!pplayers_allied(actor_player, target_player)
       && count_tech > 0
-      && (action_has_result(paction, ACTION_SPY_TARGETED_STEAL_TECH_ESC)
-          || ((diplomats_unignored_tech_stealings(actor_unit, target_city)
-               == 0)
-              && action_has_result(paction,
-                                   ACTION_SPY_TARGETED_STEAL_TECH)))) {
+      && (!expected_kills
+          || (diplomats_unignored_tech_stealings(actor_unit, target_city)
+              == 0))
+      && action_has_result(paction, ACTRES_SPY_TARGETED_STEAL_TECH)) {
     Tech_type_id tgt_tech = sub_tgt_id;
 
     /* FIXME: Should probably just try to steal a random tech if no target
@@ -152,8 +156,7 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
   }
 
   if (!pplayers_allied(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_INCITE_CITY_ESC)
-          || action_has_result(paction, ACTION_SPY_INCITE_CITY))) {
+      && (action_has_result(paction, ACTRES_SPY_INCITE_CITY))) {
     int incite_cost, expenses;
 
     incite_cost = city_incite_cost(actor_player, target_city);
@@ -168,15 +171,13 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_SABOTAGE_CITY_ESC)
-          || action_has_result(paction, ACTION_SPY_SABOTAGE_CITY))) {
+      && (action_has_result(paction, ACTRES_SPY_SABOTAGE_CITY))) {
     utility += 6000;
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC)
-          || action_has_result(paction,
-                               ACTION_SPY_TARGETED_SABOTAGE_CITY))) {
+      && (action_has_result(paction,
+                            ACTRES_SPY_TARGETED_SABOTAGE_CITY))) {
     int count_impr = count_sabotagable_improvements(target_city);
 
     if (count_impr > 0) {
@@ -186,9 +187,8 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_SABOTAGE_CITY_PRODUCTION)
-          || action_has_result(paction,
-                               ACTION_SPY_SABOTAGE_CITY_PRODUCTION_ESC))) {
+      && (action_has_result(paction,
+                            ACTRES_SPY_SABOTAGE_CITY_PRODUCTION))) {
     int count_impr = count_sabotagable_improvements(target_city);
 
     if (count_impr > 0) {
@@ -198,31 +198,27 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_STEAL_GOLD_ESC)
-          || action_has_result(paction, ACTION_SPY_STEAL_GOLD))) {
+      && (action_has_result(paction, ACTRES_SPY_STEAL_GOLD))) {
     utility += 4000;
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_STEAL_MAPS_ESC)
-          || action_has_result(paction, ACTION_STEAL_MAPS))) {
+      && (action_has_result(paction, ACTRES_STEAL_MAPS))) {
     utility += 3000;
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && action_has_result(paction, ACTION_SPY_SPREAD_PLAGUE)) {
+      && action_has_result(paction, ACTRES_SPY_SPREAD_PLAGUE)) {
     utility += 2500;
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_POISON_ESC)
-          || action_has_result(paction, ACTION_SPY_POISON))) {
+      && (action_has_result(paction, ACTRES_SPY_POISON))) {
     utility += 2000;
   }
 
   if (pplayers_at_war(actor_player, target_player)
-      && (action_has_result(paction, ACTION_SPY_NUKE_ESC)
-          || action_has_result(paction, ACTION_SPY_NUKE))) {
+      && (action_has_result(paction, ACTRES_SPY_NUKE))) {
     utility += 6500;
   }
 
@@ -237,7 +233,8 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
     };
 
     for (i = 0; i < ARRAY_SIZE(casus_belli_eft); i++) {
-      switch (casus_belli_range_for(actor_player, target_player,
+      switch (casus_belli_range_for(actor_player, unit_type_get(actor_unit),
+                                    target_player,
                                     casus_belli_eft[i], paction,
                                     city_tile(target_city))) {
       case CBR_NONE:
@@ -264,31 +261,36 @@ adv_want dai_action_value_unit_vs_city(struct action *paction,
   } else {
     /* Not going to spend the unit so care about move fragment cost. */
 
-    adv_want move_fragment_cost;
+    adv_want move_fragment_cost = 0;
+    const struct unit_type *actor_utype = unit_type_get(actor_unit);
 
-    struct unit_type *actor_utype = unit_type_get(actor_unit);
+    if (utype_pays_for_regular_move_to_tgt(paction,
+                                           unit_type_get(actor_unit))) {
+      /* Add the cost from the move. */
+      move_fragment_cost += map_move_cost_unit(&(wld.map), actor_unit,
+                                               city_tile(target_city));
+    }
 
-    /* FIXME: The action performer function may charge more. */
+    /* Note: The action performer function may charge more independently. */
     if (utype_is_moved_to_tgt_by_action(paction, actor_utype)) {
-      /* FIXME: doesn't catch all moved by action kinds. */
+      struct tile *from_tile;
 
-      struct tile *actor_tile = unit_tile(actor_unit);
-      struct tile *target_tile = city_tile(target_city);
-
-      move_fragment_cost = utype_pays_mp_for_action_estimate(paction,
-                                                             actor_utype,
-                                                             actor_player,
-                                                             actor_tile,
-                                                             target_tile);
+      /* Ugly hack to understand the OnNativeTile unit state requirements
+       * used in the Action_Success_Actor_Move_Cost effect. */
+      from_tile = unit_tile(actor_unit);
+      actor_unit->tile = city_tile(target_city);
+      move_fragment_cost += unit_pays_mp_for_action(paction, actor_unit);
+      actor_unit->tile = from_tile;
+    } else if (utype_is_unmoved_by_action(paction,
+                                          unit_type_get(actor_unit))) {
+      /* Should be accurate unless the action charges more. */
+      move_fragment_cost += unit_pays_mp_for_action(paction, actor_unit);
     } else {
-      move_fragment_cost = unit_pays_mp_for_action(paction, actor_unit);
-
-      if (utype_pays_for_regular_move_to_tgt(paction,
-                                             unit_type_get(actor_unit))) {
-        /* Add the cost from the move. */
-        move_fragment_cost += map_move_cost_unit(&(wld.map), actor_unit,
-                                                 city_tile(target_city));
-      }
+      /* Don't know where the actor unit will end up. Hope that it will be
+       * in a location similar to its current location or that any
+       * Action_Success_Actor_Move_Cost don't check unit relation to its
+       * tile. */
+      move_fragment_cost += unit_pays_mp_for_action(paction, actor_unit);
     }
 
     /* Taking MAX_MOVE_FRAGS takes all the move fragments. */
@@ -315,8 +317,7 @@ int dai_action_choose_sub_tgt_unit_vs_city(struct action *paction,
   fc_assert_ret_val(action_get_actor_kind(paction) == AAK_UNIT, 0);
   fc_assert_ret_val(action_get_target_kind(paction) == ATK_CITY, 0);
 
-  if (action_has_result(paction, ACTION_SPY_TARGETED_STEAL_TECH_ESC)
-      || action_has_result(paction, ACTION_SPY_TARGETED_STEAL_TECH)) {
+  if (action_has_result(paction, ACTRES_SPY_TARGETED_STEAL_TECH)) {
     Tech_type_id tgt_tech;
 
     tgt_tech = choose_tech_to_steal(actor_player, target_player);
@@ -324,8 +325,7 @@ int dai_action_choose_sub_tgt_unit_vs_city(struct action *paction,
     return tgt_tech;
   }
 
-  if (action_has_result(paction, ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC)
-      || action_has_result(paction, ACTION_SPY_TARGETED_SABOTAGE_CITY)) {
+  if (action_has_result(paction, ACTRES_SPY_TARGETED_SABOTAGE_CITY)) {
     /* Invalid */
     int tgt_impr = -1;
     int tgt_impr_vul = 0;

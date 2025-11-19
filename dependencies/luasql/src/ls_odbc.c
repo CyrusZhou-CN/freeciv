@@ -3,7 +3,6 @@
 ** Authors: Pedro Rabinovitch, Roberto Ierusalimschy, Diego Nehab,
 ** Tomas Guisasola
 ** See Copyright Notice in license.html
-** $Id: ls_odbc.c,v 1.39 2009/02/07 23:16:23 tomas Exp $
 */
 
 #include <assert.h>
@@ -17,7 +16,7 @@
 #include <sqlext.h>
 #elif defined(INFORMIX)
 #include "infxcli.h"
-#elif defined(UNIXODBC)
+#else
 #include "sql.h"
 #include "sqltypes.h"
 #include "sqlext.h"
@@ -33,11 +32,11 @@
 #define LUASQL_STATEMENT_ODBC "ODBC statement"
 #define LUASQL_CURSOR_ODBC "ODBC cursor"
 
-/* holds data for paramter binding */
+/* holds data for parameter binding */
 typedef struct {
 	SQLPOINTER buf;
-	SQLINTEGER len;
-	SQLINTEGER type;
+	SQLLEN len;
+	SQLLEN type;
 } param_data;
 
 /* general form of the driver objects */
@@ -88,8 +87,6 @@ static int error(SQLRETURN a)
 	return (a != SQL_SUCCESS) && (a != SQL_SUCCESS_WITH_INFO) && (a != SQL_NO_DATA);
 }
 
-
-LUASQL_API int luaopen_luasql_odbc (lua_State *L);
 
 /*
 ** Registers a given C object in the registry to avoid GC
@@ -688,7 +685,7 @@ static int raw_execute(lua_State *L, int istmt)
 		return create_cursor(L, -1, stmt, numcols);
 	} else {
 		/* if action has no results (e.g., UPDATE) */
-		SQLINTEGER numrows;
+		SQLLEN numrows;
 		if(error(SQLRowCount(stmt->hstmt, &numrows))) {
 			return fail(L, hSTMT, stmt->hstmt);
 		}
@@ -700,7 +697,7 @@ static int raw_execute(lua_State *L, int istmt)
 
 static int set_param(lua_State *L, stmt_data *stmt, int i, param_data *data)
 {
-	static SQLINTEGER cbNull = SQL_NULL_DATA;
+	static SQLLEN cbNull = SQL_NULL_DATA;
 
 	switch(lua_type(L, -1)) {
 	case LUA_TNIL: {
@@ -777,7 +774,6 @@ static int set_param(lua_State *L, stmt_data *stmt, int i, param_data *data)
 */
 static int raw_readparams_table(lua_State *L, stmt_data *stmt, int iparams)
 {
-	static SQLINTEGER cbNull = SQL_NULL_DATA;
 	SQLSMALLINT i;
 	param_data *data;
 	int res = 0;
@@ -805,7 +801,6 @@ static int raw_readparams_table(lua_State *L, stmt_data *stmt, int iparams)
 */
 static int raw_readparams_args(lua_State *L, stmt_data *stmt, int arg, int ltop)
 {
-	static SQLINTEGER cbNull = SQL_NULL_DATA;
 	SQLSMALLINT i;
 	param_data *data;
 	int res = 0;
@@ -1116,9 +1111,9 @@ static int env_close (lua_State *L)
 	env->closed = 1;
 	ret = SQLFreeHandle (hENV, env->henv);
 	if (error(ret)) {
-		int ret = fail(L, hENV, env->henv);
+		int ret2 = fail(L, hENV, env->henv);
 		env->henv = NULL;
-		return ret;
+		return ret2;
 	}
 	return pass(L);
 }

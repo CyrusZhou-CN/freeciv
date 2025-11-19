@@ -63,9 +63,8 @@ static void luaconsole_dialog_create(struct luaconsole_data *pdialog);
 static void luaconsole_dialog_refresh(struct luaconsole_data *pdialog);
 static void luaconsole_dialog_destroy(struct luaconsole_data *pdialog);
 
-static void luaconsole_dialog_area_size_allocate(GtkWidget *widget,
-                                                 GtkAllocation *allocation,
-                                                 gpointer data);
+static void luaconsole_dialog_area_resize(GtkWidget *widget, int width, int height,
+                                          gpointer data);
 static void luaconsole_dialog_scroll_to_bottom(void);
 
 static void luaconsole_input_return(GtkEntry *w, gpointer data);
@@ -182,7 +181,8 @@ void real_luaconsole_dialog_update(void)
 *****************************************************************************/
 static void luaconsole_dialog_create(struct luaconsole_data *pdialog)
 {
-  GtkWidget *entry, *box, *vbox, *sw, *text, *notebook;
+  GtkWidget *entry, *vgrid, *sw, *text, *notebook;
+  int grid_row = 0;
 
   fc_assert_ret(NULL != pdialog);
 
@@ -195,47 +195,47 @@ static void luaconsole_dialog_create(struct luaconsole_data *pdialog)
   gui_dialog_new(&pdialog->shell, GTK_NOTEBOOK(notebook), pdialog, TRUE);
   gui_dialog_set_title(pdialog->shell, _("Client Lua Console"));
 
-  box = pdialog->shell->vbox;
-
-  vbox = gtk_grid_new();
-  gtk_orientable_set_orientation(GTK_ORIENTABLE(vbox),
+  vgrid = gtk_grid_new();
+  gtk_orientable_set_orientation(GTK_ORIENTABLE(vgrid),
                                  GTK_ORIENTATION_VERTICAL);
-  gtk_container_add(GTK_CONTAINER(box), vbox);
+  gui_dialog_add_content_widget(pdialog->shell, vgrid);
 
-  sw = gtk_scrolled_window_new(NULL, NULL);
-  gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(sw),
-                                      GTK_SHADOW_ETCHED_IN);
+  sw = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(sw), TRUE);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
                                  GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-  gtk_container_add(GTK_CONTAINER(vbox), sw);
+  gtk_grid_attach(GTK_GRID(vgrid), sw, 0, grid_row++, 1, 1);
 
   text = gtk_text_view_new_with_buffer(pdialog->message_buffer);
   gtk_widget_set_hexpand(text, TRUE);
   gtk_widget_set_vexpand(text, TRUE);
   set_message_buffer_view_link_handlers(text);
   gtk_text_view_set_editable(GTK_TEXT_VIEW(text), FALSE);
-  gtk_container_add(GTK_CONTAINER(sw), text);
-  g_signal_connect(text, "size-allocate",
-                   G_CALLBACK(luaconsole_dialog_area_size_allocate), NULL);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), text);
+  g_signal_connect(text, "resize",
+                   G_CALLBACK(luaconsole_dialog_area_resize), NULL);
 
   gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD);
   gtk_widget_realize(text);
   gtk_text_view_set_left_margin(GTK_TEXT_VIEW(text), 5);
 
   pdialog->message_area = GTK_TEXT_VIEW(text);
-  g_signal_connect(text, "destroy", G_CALLBACK(gtk_widget_destroyed),
+  g_signal_connect(text, "destroy", G_CALLBACK(widget_destroyed),
                    &pdialog->message_area);
 
   /* The lua console input line. */
   entry = gtk_entry_new();
-  g_object_set(entry, "margin", 2, NULL);
-  gtk_container_add(GTK_CONTAINER(vbox), entry);
+  gtk_widget_set_margin_bottom(entry, 2);
+  gtk_widget_set_margin_end(entry, 2);
+  gtk_widget_set_margin_start(entry, 2);
+  gtk_widget_set_margin_top(entry, 2);
+  gtk_grid_attach(GTK_GRID(vgrid), entry, 0, grid_row++, 1, 1);
   g_signal_connect(entry, "activate", G_CALLBACK(luaconsole_input_return),
                    NULL);
   g_signal_connect(entry, "key_press_event",
                    G_CALLBACK(luaconsole_input_handler), NULL);
   pdialog->entry = entry;
-  g_signal_connect(entry, "destroy", G_CALLBACK(gtk_widget_destroyed),
+  g_signal_connect(entry, "destroy", G_CALLBACK(widget_destroyed),
                    &pdialog->entry);
 
   /* Load lua script command button. */
@@ -320,7 +320,6 @@ static void luaconsole_load_file_popup(void)
                                         _("_Open"), GTK_RESPONSE_OK,
                                         NULL);
   setup_dialog(filesel, toplevel);
-  gtk_window_set_position(GTK_WINDOW(filesel), GTK_WIN_POS_MOUSE);
 
   g_signal_connect(filesel, "response",
                    G_CALLBACK(luaconsole_load_file_callback), NULL);
@@ -332,21 +331,26 @@ static void luaconsole_load_file_popup(void)
 /*************************************************************************//**
   Callback for luaconsole_load_file_popup().
 *****************************************************************************/
-static void luaconsole_load_file_callback(GtkWidget *widget, gint response,
+static void luaconsole_load_file_callback(GtkWidget *dlg, gint response,
                                           gpointer data)
 {
   if (response == GTK_RESPONSE_OK) {
-    gchar *filename = g_filename_to_utf8(gtk_file_chooser_get_filename
-                                         (GTK_FILE_CHOOSER(widget)),
-                                         -1, NULL, NULL, NULL);
+    GFile *file = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dlg));
 
-    if (NULL != filename) {
-      luaconsole_printf(ftc_luaconsole_input, "(file)> %s", filename);
-      script_client_do_file(filename);
-      g_free(filename);
+    if (file != NULL) {
+      gchar *filename = g_file_get_parse_name(file);
+
+      if (NULL != filename) {
+        luaconsole_printf(ftc_luaconsole_input, "(file)> %s", filename);
+        script_client_do_file(filename);
+        g_free(filename);
+      }
+
+      g_object_unref(file);
     }
   }
-  gtk_widget_destroy(widget);
+
+  gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
 /*************************************************************************//**
@@ -361,7 +365,7 @@ static gboolean luaconsole_input_handler(GtkWidget *w, GdkEvent *ev)
   fc_assert_ret_val(pdialog, FALSE);
   fc_assert_ret_val(pdialog->history_list, FALSE);
 
-  gdk_event_get_keyval(ev, &keyval);
+  keyval = gdk_key_event_get_keyval(ev);
   switch (keyval) {
   case GDK_KEY_Up:
     if (pdialog->history_pos < genlist_size(pdialog->history_list) - 1) {
@@ -397,16 +401,16 @@ static gboolean luaconsole_input_handler(GtkWidget *w, GdkEvent *ev)
   prevents users from accidentally missing messages when the chatline
   gets scrolled up a small amount and stops scrolling down automatically.
 *****************************************************************************/
-static void luaconsole_dialog_area_size_allocate(GtkWidget *widget,
-                                                 GtkAllocation *allocation,
-                                                 gpointer data)
+static void luaconsole_dialog_area_resize(GtkWidget *widget, int width, int height,
+                                          gpointer data)
 {
   static int old_width = 0, old_height = 0;
-  if (allocation->width != old_width
-      || allocation->height != old_height) {
+
+  if (width != old_width
+      || height != old_height) {
     luaconsole_dialog_scroll_to_bottom();
-    old_width = allocation->width;
-    old_height = allocation->height;
+    old_width = width;
+    old_height = height;
   }
 }
 
@@ -480,11 +484,11 @@ void real_luaconsole_append(const char *astring,
   if (GUI_GTK_OPTION(show_chat_message_time)) {
     char timebuf[64];
     time_t now;
-    struct tm *now_tm;
+    struct tm now_tm;
 
     now = time(NULL);
-    now_tm = localtime(&now);
-    strftime(timebuf, sizeof(timebuf), "[%H:%M:%S] ", now_tm);
+    fc_localtime(&now, &now_tm);
+    strftime(timebuf, sizeof(timebuf), "[%H:%M:%S] ", &now_tm);
     gtk_text_buffer_insert(buf, &iter, timebuf, -1);
   }
 

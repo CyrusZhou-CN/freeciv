@@ -23,6 +23,7 @@
 
 /* server */
 #include "aiiface.h"
+#include "nation.h"
 #include "notify.h"
 #include "plrhand.h"
 #include "unithand.h"
@@ -45,14 +46,14 @@ static void action_success_actor_consume(struct action *paction,
 {
   if (unit_is_alive(actor_id)
       && utype_is_consumed_by_action(paction, unit_type_get(actor))) {
-    if (action_has_result(paction, ACTION_DISBAND_UNIT)
-        || action_has_result(paction, ACTION_RECYCLE_UNIT)) {
+    if (action_has_result(paction, ACTRES_DISBAND_UNIT)
+        || action_has_result(paction, ACTRES_DISBAND_UNIT_RECOVER)) {
       wipe_unit(actor, ULR_DISBANDED, NULL);
-    } else if (action_has_result(paction, ACTION_NUKE)
-               || action_has_result(paction, ACTION_NUKE_CITY)
-               || action_has_result(paction, ACTION_NUKE_UNITS)) {
+    } else if (action_has_result(paction, ACTRES_NUKE)
+               || action_has_result(paction, ACTRES_NUKE_UNITS)) {
       wipe_unit(actor, ULR_DETONATED, NULL);
-    } else if (action_has_result(paction, ACTION_SUICIDE_ATTACK)) {
+    } else if (action_has_result(paction, ACTRES_ATTACK)
+               || action_has_result(paction, ACTRES_WIPE_UNITS)) {
       wipe_unit(actor, ULR_MISSILE, NULL);
     } else {
       wipe_unit(actor, ULR_USED, NULL);
@@ -82,10 +83,15 @@ void action_success_target_pay_mp(struct action *paction,
   if (unit_is_alive(target_id)) {
     int spent_mp = get_target_bonus_effects(
         NULL,
-        unit_owner(target), NULL,
-        unit_tile(target) ? tile_city(unit_tile(target)) : NULL,
-        NULL, unit_tile(target), target, unit_type_get(target),
-        NULL, NULL, paction,
+        &(const struct req_context) {
+          .player = unit_owner(target),
+          .city = unit_tile(target) ? tile_city(unit_tile(target)) : NULL,
+          .tile = unit_tile(target),
+          .unit = target,
+          .unittype = unit_type_get(target),
+          .action = paction,
+        },
+        NULL,
         EFT_ACTION_SUCCESS_TARGET_MOVE_COST);
 
     target->moves_left = MAX(0, target->moves_left - spent_mp);
@@ -124,8 +130,8 @@ static void action_give_casus_belli(struct player *offender,
     } players_iterate_end;
   } else if (victim_player && offender != victim_player) {
     /* If an unclaimed tile is nuked there is no victim to give casus
-     * belli. If an actor nukes his own tile he is more than willing to
-     * forgive him self. */
+     * belli. If an actor nukes their own tile, they are more than willing
+     * to forgive themself. */
 
     /* Give the victim player a casus belli. */
     player_diplstate_get(victim_player, offender)->has_reason_to_cancel =
@@ -136,61 +142,6 @@ static void action_give_casus_belli(struct player *offender,
 }
 
 /**********************************************************************//**
-  Returns the kind of diplomatic incident an action may cause.
-**************************************************************************/
-static enum incident_type action_to_incident(const struct action *paction)
-{
-  /* Action id is currently the action's only result. */
-  switch ((enum gen_action)paction->id) {
-  case ACTION_NUKE:
-  case ACTION_NUKE_CITY:
-  case ACTION_NUKE_UNITS:
-  case ACTION_SPY_NUKE:
-  case ACTION_SPY_NUKE_ESC:
-    return INCIDENT_NUCLEAR;
-  case ACTION_PILLAGE:
-    return INCIDENT_PILLAGE;
-  default:
-    /* FIXME: Some actions are neither nuclear nor diplomat. */
-    return INCIDENT_DIPLOMAT;
-  }
-}
-
-/**********************************************************************//**
-  Notify the players controlled by the built in AI.
-**************************************************************************/
-static void action_notify_ai(const struct action *paction,
-                             struct player *offender,
-                             struct player *victim_player)
-{
-  const enum incident_type incident = action_to_incident(paction);
-
-  /* Notify the victim player. */
-  call_incident(incident, offender, victim_player);
-
-  if (incident == INCIDENT_NUCLEAR) {
-    /* Tell the world. */
-    if (offender == victim_player) {
-      players_iterate(oplayer) {
-        if (victim_player != oplayer) {
-          call_incident(INCIDENT_NUCLEAR_SELF, offender, oplayer);
-        }
-      } players_iterate_end;
-    } else {
-      players_iterate(oplayer) {
-        if (victim_player != oplayer) {
-          call_incident(INCIDENT_NUCLEAR_NOT_TARGET, offender, oplayer);
-        }
-      } players_iterate_end;
-    }
-  }
-
-  /* TODO: Should incident be called when the ai gets a casus belli because
-   * of something done to a third party? If yes: should a new incident kind
-   * be used? */
-}
-
-/**********************************************************************//**
   Take care of any consequences (like casus belli) of the given action
   when the situation was as specified.
 
@@ -198,6 +149,7 @@ static void action_notify_ai(const struct action *paction,
 **************************************************************************/
 static void action_consequence_common(const struct action *paction,
                                       struct player *offender,
+                                      const struct unit_type *offender_utype,
                                       struct player *victim_player,
                                       const struct tile *victim_tile,
                                       const char *victim_link,
@@ -208,7 +160,7 @@ static void action_consequence_common(const struct action *paction,
 {
   enum casus_belli_range cbr;
 
-  cbr = casus_belli_range_for(offender, victim_player,
+  cbr = casus_belli_range_for(offender, offender_utype, victim_player,
                               eft, paction, victim_tile);
 
   if (cbr >= CBR_VICTIM_ONLY) {
@@ -221,7 +173,7 @@ static void action_consequence_common(const struct action *paction,
 
     /* Notify the involved players by sending them a message. */
     notify_actor(offender, paction, offender, victim_player,
-                victim_tile, victim_link);
+                 victim_tile, victim_link);
     notify_victim(victim_player, paction, offender, victim_player,
                   victim_tile, victim_link);
 
@@ -238,7 +190,7 @@ static void action_consequence_common(const struct action *paction,
     action_give_casus_belli(offender, victim_player, int_outrage);
 
     /* Notify players controlled by the built in AI. */
-    action_notify_ai(paction, offender, victim_player);
+    call_incident(INCIDENT_ACTION, cbr, paction, offender, victim_player);
 
     /* Update the clients. */
     send_player_all_c(offender, NULL);
@@ -263,7 +215,7 @@ static void notify_actor_caught(struct player *receiver,
                                 const char *victim_link)
 {
   if (!victim_player || offender == victim_player) {
-    /* There is no victim or the actor did this to him self. */
+    /* There is no victim or the actor did this to themself. */
     return;
   }
 
@@ -290,6 +242,7 @@ static void notify_actor_caught(struct player *receiver,
                   victim_link);
     break;
   case ATK_TILE:
+  case ATK_EXTRAS:
     notify_player(receiver, victim_tile,
                   E_DIPLOMATIC_INCIDENT, ftc_server,
                   /* TRANS: Explode Nuclear ... (54, 26) */
@@ -319,7 +272,7 @@ static void notify_victim_caught(struct player *receiver,
                                  const char *victim_link)
 {
   if (!victim_player || offender == victim_player) {
-    /* There is no victim or the actor did this to him self. */
+    /* There is no victim or the actor did this to themself. */
     return;
   }
 
@@ -347,6 +300,7 @@ static void notify_victim_caught(struct player *receiver,
                   victim_link);
     break;
   case ATK_TILE:
+  case ATK_EXTRAS:
     notify_player(receiver, victim_tile,
                   E_DIPLOMATIC_INCIDENT, ftc_server,
                   /* TRANS: Europeans ... Explode Nuclear ... (54, 26) */
@@ -419,12 +373,12 @@ static void notify_global_caught(struct player *receiver,
 **************************************************************************/
 void action_consequence_caught(const struct action *paction,
                                struct player *offender,
+                               const struct unit_type *offender_utype,
                                struct player *victim_player,
                                const struct tile *victim_tile,
                                const char *victim_link)
 {
-
-  action_consequence_common(paction, offender,
+  action_consequence_common(paction, offender, offender_utype,
                             victim_player, victim_tile, victim_link,
                             notify_actor_caught,
                             notify_victim_caught,
@@ -444,7 +398,7 @@ static void notify_actor_success(struct player *receiver,
                                  const char *victim_link)
 {
   if (!victim_player || offender == victim_player) {
-    /* There is no victim or the actor did this to him self. */
+    /* There is no victim or the actor did this to themself. */
     return;
   }
 
@@ -469,6 +423,7 @@ static void notify_actor_success(struct player *receiver,
                   victim_link);
     break;
   case ATK_TILE:
+  case ATK_EXTRAS:
     notify_player(receiver, victim_tile,
                   E_DIPLOMATIC_INCIDENT, ftc_server,
                   /* TRANS: Explode Nuclear ... (54, 26) */
@@ -497,7 +452,7 @@ static void notify_victim_success(struct player *receiver,
                                   const char *victim_link)
 {
   if (!victim_player || offender == victim_player) {
-    /* There is no victim or the actor did this to him self. */
+    /* There is no victim or the actor did this to themself. */
     return;
   }
 
@@ -524,6 +479,7 @@ static void notify_victim_success(struct player *receiver,
                   victim_link);
     break;
   case ATK_TILE:
+  case ATK_EXTRAS:
     notify_player(receiver, victim_tile,
                   E_DIPLOMATIC_INCIDENT, ftc_server,
                   /* TRANS: Europeans ... Explode Nuclear ... (54, 26) */
@@ -594,16 +550,38 @@ static void notify_global_success(struct player *receiver,
 **************************************************************************/
 void action_consequence_success(const struct action *paction,
                                 struct player *offender,
+                                const struct unit_type *offender_utype,
                                 struct player *victim_player,
                                 const struct tile *victim_tile,
                                 const char *victim_link)
 {
-  action_consequence_common(paction, offender,
+  action_consequence_common(paction, offender, offender_utype,
                             victim_player, victim_tile, victim_link,
                             notify_actor_success,
                             notify_victim_success,
                             notify_global_success,
                             EFT_CASUS_BELLI_SUCCESS);
+}
+
+/**************************************************************************
+  Take care of any consequences (like casus belli) of successfully
+  completing the given action.
+
+  victim_player can be NULL
+**************************************************************************/
+void action_consequence_complete(const struct action *paction,
+                                 struct player *offender,
+                                 const struct unit_type *offender_utype,
+                                 struct player *victim_player,
+                                 const struct tile *victim_tile,
+                                 const char *victim_link)
+{
+  action_consequence_common(paction, offender, offender_utype,
+                            victim_player, victim_tile, victim_link,
+                            notify_actor_success,
+                            notify_victim_success,
+                            notify_global_success,
+                            EFT_CASUS_BELLI_COMPLETE);
 }
 
 /**********************************************************************//**
@@ -736,55 +714,10 @@ struct unit *action_tgt_unit(struct unit *actor, struct tile *target_tile,
 
 /**********************************************************************//**
   Returns the tile iff it, from the point of view of the owner of the
-  actor unit, looks like each unit on it is an ATK_UNITS target for the
-  actor unit.
-
-  Returns NULL if the player knows that the actor unit can't do any
-  ATK_UNITS action to all units at the target tile.
-
-  If the owner of the actor unit doesn't have the knowledge needed to know
-  for sure if the unit can act the tile will be returned.
-
-  If the only action(s) that can be performed against a target has the
-  rare_pop_up property the target will only be considered valid if the
-  accept_all_actions argument is TRUE.
-**************************************************************************/
-struct tile *action_tgt_tile_units(struct unit *actor,
-                                   struct tile *target,
-                                   bool accept_all_actions)
-{
-  if (actor == NULL || target == NULL) {
-    /* Can't do any actions if actor or target are missing. */
-    return NULL;
-  }
-
-  action_iterate(act) {
-    if (!(action_id_get_actor_kind(act) == AAK_UNIT
-        && action_id_get_target_kind(act) == ATK_UNITS)) {
-      /* Not a relevant action. */
-      continue;
-    }
-
-    if (action_id_is_rare_pop_up(act) && !accept_all_actions) {
-      /* Not relevant since not accepted here. */
-      continue;
-    }
-
-    if (action_prob_possible(action_prob_vs_units(actor, act, target))) {
-      /* One action is enough. */
-      return target;
-    }
-  } action_iterate_end;
-
-  return NULL;
-}
-
-/**********************************************************************//**
-  Returns the tile iff it, from the point of view of the owner of the
   actor unit, looks like a target tile.
 
   Returns NULL if the player knows that the actor unit can't do any
-  ATK_TILE action to the tile.
+  action (that specifies its target as a tile) to the tile.
 
   If the owner of the actor unit doesn't have the knowledge needed to know
   for sure if the unit can act the tile will be returned.
@@ -804,8 +737,9 @@ struct tile *action_tgt_tile(struct unit *actor,
   }
 
   action_iterate(act) {
-    if (!(action_id_get_actor_kind(act) == AAK_UNIT
-        && action_id_get_target_kind(act) == ATK_TILE)) {
+    struct act_prob prob;
+
+    if (action_id_get_actor_kind(act) != AAK_UNIT) {
       /* Not a relevant action. */
       continue;
     }
@@ -815,8 +749,28 @@ struct tile *action_tgt_tile(struct unit *actor,
       continue;
     }
 
-    if (action_prob_possible(action_prob_vs_tile(actor, act, target,
-                                                 target_extra))) {
+    switch (action_id_get_target_kind(act)) {
+    case ATK_TILE:
+      prob = action_prob_vs_tile(actor, act, target, target_extra);
+      break;
+    case ATK_EXTRAS:
+      prob = action_prob_vs_extras(actor, act, target, target_extra);
+      break;
+    case ATK_UNITS:
+      prob = action_prob_vs_units(actor, act, target);
+      break;
+    case ATK_CITY:
+    case ATK_UNIT:
+    case ATK_SELF:
+      /* Target not specified by tile. */
+      continue;
+    case ATK_COUNT:
+      /* Invalid target kind */
+      fc_assert(action_id_get_target_kind(act) != ATK_COUNT);
+      continue;
+    }
+
+    if (action_prob_possible(prob)) {
       /* The actor unit may be able to do this action to the target
        * tile. */
       return target;
@@ -850,7 +804,8 @@ static bool may_unit_act_vs_tile_extra(const struct unit *actor,
 
   action_iterate(act) {
     if (!(action_id_get_actor_kind(act) == AAK_UNIT
-          && action_id_get_target_kind(act) == ATK_TILE
+          && (action_id_get_target_kind(act) == ATK_TILE
+              || action_id_get_target_kind(act) == ATK_EXTRAS)
           && action_id_has_complex_target(act))) {
       /* Not a relevant action. */
       continue;
@@ -861,11 +816,33 @@ static bool may_unit_act_vs_tile_extra(const struct unit *actor,
       continue;
     }
 
-    if (action_prob_possible(action_prob_vs_tile(actor, act,
-                                                 tgt_tile, tgt_extra))) {
-      /* The actor unit may be able to do this action to the target
-       * extra. */
-      return TRUE;
+    switch (action_id_get_target_kind(act)) {
+    case ATK_TILE:
+      if (action_prob_possible(action_prob_vs_tile(actor, act,
+                                                   tgt_tile, tgt_extra))) {
+        /* The actor unit may be able to do this action to the target
+         * extra. */
+        return TRUE;
+      }
+      break;
+    case ATK_EXTRAS:
+      if (action_prob_possible(action_prob_vs_extras(actor, act,
+                                                     tgt_tile,
+                                                     tgt_extra))) {
+        /* The actor unit may be able to do this action to the target
+         * extra. */
+        return TRUE;
+      }
+      break;
+    case ATK_CITY:
+    case ATK_UNIT:
+    case ATK_UNITS:
+    case ATK_SELF:
+      /* Not supported. */
+      break;
+    case ATK_COUNT:
+      fc_assert(action_id_get_target_kind(act) != ATK_COUNT);
+      break;
     }
   } action_iterate_end;
 
@@ -899,6 +876,65 @@ struct extra_type *action_tgt_tile_extra(const struct unit *actor,
 }
 
 /**********************************************************************//**
+  Find an sub target for the specified action.
+**************************************************************************/
+int action_sub_target_id_for_action(const struct action *paction,
+                                    struct unit *actor_unit)
+{
+  const struct tile *tgt_tile = unit_tile(actor_unit);
+
+  fc_assert_ret_val(paction->target_complexity == ACT_TGT_COMPL_FLEXIBLE,
+                    NO_TARGET);
+
+  switch (action_get_sub_target_kind(paction)) {
+  case ASTK_NONE:
+    /* Should not be reached */
+    fc_assert_ret_val(action_get_sub_target_kind(paction) != ASTK_NONE,
+                      NO_TARGET);
+    break;
+  case ASTK_BUILDING:
+    /* Implement if a building sub targeted action becomes flexible */
+    fc_assert_ret_val(paction->target_complexity == ACT_TGT_COMPL_FLEXIBLE,
+                      NO_TARGET);
+    break;
+  case ASTK_TECH:
+    /* Implement if a tech sub targeted action becomes flexible */
+    fc_assert_ret_val(paction->target_complexity == ACT_TGT_COMPL_FLEXIBLE,
+                      NO_TARGET);
+    break;
+  case ASTK_EXTRA:
+  case ASTK_EXTRA_NOT_THERE:
+    if (action_has_result(paction, ACTRES_PILLAGE)) {
+      /* Special treatment for "Pillage" */
+      struct extra_type *pextra;
+      enum unit_activity activity = action_get_activity(paction);
+
+      unit_assign_specific_activity_target(actor_unit, &activity, &pextra);
+
+      if (pextra != NULL) {
+        return extra_number(pextra);
+      }
+    }
+    extra_type_re_active_iterate(tgt_extra) {
+      if (action_prob_possible(action_prob_vs_tile(actor_unit, paction->id,
+                                                   tgt_tile, tgt_extra))) {
+        /* The actor unit may be able to do this action to the target
+         * extra. */
+        return extra_number(tgt_extra);
+      }
+    } extra_type_re_active_iterate_end;
+    break;
+  case ASTK_COUNT:
+    /* Should not exist. */
+    fc_assert_ret_val(action_get_sub_target_kind(paction) != ASTK_COUNT,
+                      NO_TARGET);
+    break;
+  }
+
+  return NO_TARGET;
+}
+
+/**********************************************************************//**
   Returns the action auto performer that the specified cause can force the
   specified actor to perform. Returns NULL if no such action auto performer
   exists.
@@ -907,13 +943,20 @@ const struct action_auto_perf *
 action_auto_perf_unit_sel(const enum action_auto_perf_cause cause,
                           const struct unit *actor,
                           const struct player *other_player,
-                          const struct output_type *output)
+                          const struct output_type *eval_output,
+                          const struct action *eval_action)
 {
+  const struct req_context actor_ctxt = {
+    .player = unit_owner(actor),
+    .tile = unit_tile(actor),
+    .unit = actor,
+    .unittype = unit_type_get(actor),
+    .output = eval_output,
+    .action = eval_action,
+  };
+
   action_auto_perf_by_cause_iterate(cause, autoperformer) {
-    if (are_reqs_active(unit_owner(actor), other_player,
-                        NULL, NULL, unit_tile(actor),
-                        actor, unit_type_get(actor),
-                        output, NULL, NULL,
+    if (are_reqs_active(&actor_ctxt, other_player,
                         &autoperformer->reqs, RPT_CERTAIN)) {
       /* Select this action auto performer. */
       return autoperformer;
@@ -934,10 +977,7 @@ action_auto_perf_unit_sel(const enum action_auto_perf_cause cause,
                                             TRUE));                        \
   tgt_unit = (target_unit ? target_unit                                    \
                           : action_tgt_unit(actor, unit_tile(actor),       \
-                                            TRUE));                        \
-  tgt_units = (target_tile                                                 \
-               ? target_tile                                               \
-               : action_tgt_tile_units(actor, unit_tile(actor), TRUE));
+                                            TRUE));
 
 /**********************************************************************//**
   Make the specified actor unit perform an action because of cause.
@@ -951,7 +991,8 @@ const struct action *
 action_auto_perf_unit_do(const enum action_auto_perf_cause cause,
                          struct unit *actor,
                          const struct player *other_player,
-                         const struct output_type *output,
+                         const struct output_type *eval_output,
+                         const struct action *eval_action,
                          const struct tile *target_tile,
                          const struct city *target_city,
                          const struct unit *target_unit,
@@ -962,10 +1003,10 @@ action_auto_perf_unit_do(const enum action_auto_perf_cause cause,
   const struct city *tgt_city;
   const struct tile *tgt_tile;
   const struct unit *tgt_unit;
-  const struct tile *tgt_units;
 
   const struct action_auto_perf *autoperf
-      = action_auto_perf_unit_sel(cause, actor, other_player, output);
+      = action_auto_perf_unit_sel(cause, actor, other_player,
+                                  eval_output, eval_action);
 
   if (!autoperf) {
     /* No matching Action Auto Performer. */
@@ -990,16 +1031,25 @@ action_auto_perf_unit_do(const enum action_auto_perf_cause cause,
 
       switch (action_id_get_target_kind(act)) {
       case ATK_UNITS:
-        if (tgt_units
-            && is_action_enabled_unit_on_units(act, actor, tgt_units)) {
-          perform_action_to(act, actor, tgt_units->index, EXTRA_NONE);
+        if (tgt_tile
+            && is_action_enabled_unit_on_units(act, actor, tgt_tile)) {
+          perform_action_to(act, actor, tgt_tile->index, EXTRA_NONE);
         }
         break;
       case ATK_TILE:
         if (tgt_tile
             && is_action_enabled_unit_on_tile(act, actor, tgt_tile,
                                               target_extra)) {
-          perform_action_to(act, actor, tgt_tile->index, extra_number(target_extra));
+          perform_action_to(act, actor, tgt_tile->index,
+                            target_extra ? extra_number(target_extra) : -1);
+        }
+        break;
+      case ATK_EXTRAS:
+        if (tgt_tile
+            && is_action_enabled_unit_on_extras(act, actor,
+                                                tgt_tile, target_extra)) {
+          perform_action_to(act, actor, tgt_tile->index,
+                            target_extra ? extra_number(target_extra) : -1);
         }
         break;
       case ATK_CITY:
@@ -1042,7 +1092,8 @@ struct act_prob
 action_auto_perf_unit_prob(const enum action_auto_perf_cause cause,
                            struct unit *actor,
                            const struct player *other_player,
-                           const struct output_type *output,
+                           const struct output_type *eval_output,
+                           const struct action *eval_action,
                            const struct tile *target_tile,
                            const struct city *target_city,
                            const struct unit *target_unit,
@@ -1053,10 +1104,10 @@ action_auto_perf_unit_prob(const enum action_auto_perf_cause cause,
   const struct city *tgt_city;
   const struct tile *tgt_tile;
   const struct unit *tgt_unit;
-  const struct tile *tgt_units;
 
   const struct action_auto_perf *autoperf
-      = action_auto_perf_unit_sel(cause, actor, other_player, output);
+      = action_auto_perf_unit_sel(cause, actor, other_player,
+                                  eval_output, eval_action);
 
   if (!autoperf) {
     /* No matching Action Auto Performer. */
@@ -1076,15 +1127,23 @@ action_auto_perf_unit_prob(const enum action_auto_perf_cause cause,
 
       switch (action_id_get_target_kind(act)) {
       case ATK_UNITS:
-        if (tgt_units
-            && is_action_enabled_unit_on_units(act, actor, tgt_units)) {
-          current = action_prob_vs_units(actor, act, tgt_units);
+        if (tgt_tile
+            && is_action_enabled_unit_on_units(act, actor, tgt_tile)) {
+          current = action_prob_vs_units(actor, act, tgt_tile);
         }
         break;
       case ATK_TILE:
         if (tgt_tile
             && is_action_enabled_unit_on_tile(act, actor, tgt_tile, target_extra)) {
           current = action_prob_vs_tile(actor, act, tgt_tile, target_extra);
+        }
+        break;
+      case ATK_EXTRAS:
+        if (tgt_tile
+            && is_action_enabled_unit_on_extras(act, actor,
+                                                tgt_tile, target_extra)) {
+          current = action_prob_vs_extras(actor, act,
+                                          tgt_tile, target_extra);
         }
         break;
       case ATK_CITY:

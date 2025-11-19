@@ -197,7 +197,7 @@ static int write_socket_data(struct connection *pc,
     }
 
     if (FD_ISSET(pc->sock, &writefs)) {
-      nblock=MIN(buf->ndata-start, MAX_LEN_PACKET);
+      nblock = MIN(buf->ndata-start, MAX_LEN_PACKET);
       log_debug("trying to write %d limit=%d", nblock, limit);
       if ((nput = fc_writesocket(pc->sock, 
                                  (const char *)buf->data+start, nblock)) == -1) {
@@ -216,7 +216,8 @@ static int write_socket_data(struct connection *pc,
   if (start > 0) {
     buf->ndata -= start;
     memmove(buf->data, buf->data+start, buf->ndata);
-    pc->last_write = timer_renew(pc->last_write, TIMER_USER, TIMER_ACTIVE);
+    pc->last_write = timer_renew(pc->last_write, TIMER_USER, TIMER_ACTIVE,
+                                 pc->last_write != NULL ? NULL : "socket write");
     timer_start(pc->last_write);
   }
 
@@ -619,6 +620,8 @@ void connection_common_init(struct connection *pconn)
   byte_vector_init(&pconn->compression.queue);
   pconn->compression.frozen_level = 0;
 #endif /* USE_COMPRESSION */
+
+  pconn->client_gui = GUI_STUB;
 }
 
 /**********************************************************************//**
@@ -857,7 +860,7 @@ bool conn_pattern_list_match(const struct conn_pattern_list *plist,
 }
 
 /**********************************************************************//**
-  Put a string reprentation of the pattern in 'buf'.
+  Put a string representation of the pattern in 'buf'.
 **************************************************************************/
 size_t conn_pattern_to_string(const struct conn_pattern *ppattern,
                               char *buf, size_t buf_len)
@@ -877,7 +880,7 @@ struct conn_pattern *conn_pattern_from_string(const char *pattern,
                                               char *error_buf,
                                               size_t error_buf_len)
 {
-  enum conn_pattern_type type = conn_pattern_type_invalid();
+  enum conn_pattern_type type;
   const char *p;
 
   /* Determine pattern type. */
@@ -921,7 +924,7 @@ struct conn_pattern *conn_pattern_from_string(const char *pattern,
     return NULL;
   }
 
-  return  conn_pattern_new(type, p);
+  return conn_pattern_new(type, p);
 }
 
 /**********************************************************************//**

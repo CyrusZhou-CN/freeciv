@@ -19,6 +19,7 @@
 #include "astring.h"
 
 /* common */
+#include "combat.h"
 #include "extras.h"
 #include "fc_types.h"
 #include "game.h"  /* FIXME it's extra_type_iterate that needs this really */
@@ -63,8 +64,6 @@ static void calc_activity(struct actcalc *calc, const struct tile *ptile,
 
   t = fc_calloc(1, sizeof(*t));
 
-  memset(calc, 0, sizeof(*calc));
-
   /* Contributions from real units */
   unit_list_iterate(ptile->units, punit) {
     Activity_type_id act = punit->activity;
@@ -74,7 +73,7 @@ static void calc_activity(struct actcalc *calc, const struct tile *ptile,
       continue;
     }
 
-    if (is_build_activity(act, ptile)) {
+    if (is_build_activity(act)) {
       int eidx = extra_index(punit->activity_target);
 
       t->extra_total[eidx][act] += punit->activity_count;
@@ -96,7 +95,7 @@ static void calc_activity(struct actcalc *calc, const struct tile *ptile,
   /* Hypothetical contribution from pmodunit, if it changed to specified
    * activity/target */
   if (pmodunit) {
-    if (is_build_activity(new_act, ptile)) {
+    if (is_build_activity(new_act)) {
       int eidx = extra_index(new_tgt);
 
       if (new_act == pmodunit->changed_from
@@ -127,54 +126,66 @@ static void calc_activity(struct actcalc *calc, const struct tile *ptile,
   activity_type_iterate(act) {
     int remains, turns;
 
-    extra_type_iterate(ep) {
-      int ei = extra_index(ep);
-
-      {
+    if (is_build_activity(act)) {
+      extra_type_iterate(ep) {
+        int ei = extra_index(ep);
         int units_total = t->extra_units[ei][act];
 
         if (units_total > 0) {
           remains
-              = tile_activity_time(act, ptile, ep)- t->extra_total[ei][act];
+            = tile_activity_time(act, ptile, ep)- t->extra_total[ei][act];
           if (remains > 0) {
             turns = 1 + (remains + units_total - 1) / units_total;
           } else {
-            /* extra will be finished this turn */
+            /* Extra will be finished this turn */
             turns = 1;
           }
-          calc->extra_turns[ei][act] = turns;
+        } else {
+          turns = 0;
         }
-      }
-      {
+
+        calc->extra_turns[ei][act] = turns;
+      } extra_type_iterate_end;
+    } else if (is_clean_activity(act)) {
+      extra_type_iterate(ep) {
+        int ei = extra_index(ep);
         int units_total = t->rmextra_units[ei][act];
 
         if (units_total > 0) {
           remains
-              = tile_activity_time(act, ptile, ep) - t->rmextra_total[ei][act];
+            = tile_activity_time(act, ptile, ep) - t->rmextra_total[ei][act];
           if (remains > 0) {
             turns = 1 + (remains + units_total - 1) / units_total;
           } else {
-            /* extra will be removed this turn */
+            /* Extra will be removed this turn */
             turns = 1;
           }
-          calc->rmextra_turns[ei][act] = turns;
+        } else {
+          turns = 0;
         }
-      }
-    } extra_type_iterate_end;
 
-    int units_total = t->activity_units[act];
+        calc->rmextra_turns[ei][act] = turns;
+      } extra_type_iterate_end;
+    } else {
+      int units_total = t->activity_units[act];
 
-    if (units_total > 0) {
-      remains = tile_activity_time(act, ptile, NULL) - t->activity_total[act];
-      if (remains > 0) {
-        turns = 1 + (remains + units_total - 1) / units_total;
+      if (units_total > 0) {
+        remains = tile_activity_time(act, ptile, NULL) - t->activity_total[act];
+        if (remains > 0) {
+          turns = 1 + (remains + units_total - 1) / units_total;
+        } else {
+          /* Activity will be finished this turn */
+          turns = 1;
+        }
       } else {
-        /* activity will be finished this turn */
-        turns = 1;
+        turns = 0;
       }
+
       calc->activity_turns[act] = turns;
     }
   } activity_type_iterate_end;
+
+  free(t);
 }
 
 /************************************************************************//**
@@ -196,7 +207,7 @@ int turns_to_activity_done(const struct tile *ptile,
   calc_activity(calc, ptile, pmodunit, act, tgt);
 
   /* ...and extract just the one we want. */
-  if (is_build_activity(act, ptile)) {
+  if (is_build_activity(act)) {
     int tgti = extra_index(tgt);
 
     turns = calc->extra_turns[tgti][act];
@@ -208,7 +219,8 @@ int turns_to_activity_done(const struct tile *ptile,
     turns = calc->activity_turns[act];
   }
 
-  FC_FREE(calc);
+  free(calc);
+
   return turns;
 }
 
@@ -226,7 +238,7 @@ const char *concat_tile_activity_text(struct tile *ptile)
   calc_activity(calc, ptile, NULL, ACTIVITY_LAST, NULL);
 
   activity_type_iterate(i) {
-    if (is_build_activity(i, ptile)) {
+    if (is_build_activity(i)) {
       extra_type_iterate(ep) {
         int ei = extra_index(ep);
 
@@ -246,6 +258,7 @@ const char *concat_tile_activity_text(struct tile *ptile)
       case ACTIVITY_PILLAGE:
         rmcause = ERM_PILLAGE;
         break;
+      case ACTIVITY_CLEAN: /* ERM_CLEANPOLLUTION first, ERM_CLEANFALLOUT later */
       case ACTIVITY_POLLUTION:
         rmcause = ERM_CLEANPOLLUTION;
         break;
@@ -273,6 +286,23 @@ const char *concat_tile_activity_text(struct tile *ptile)
           }
         } extra_type_by_rmcause_iterate_end;
       }
+
+      if (i == ACTIVITY_CLEAN) {
+        extra_type_by_rmcause_iterate(ERM_CLEANFALLOUT, ep) {
+          if (!is_extra_caused_by(ep, ERM_CLEANPOLLUTION)) {
+            int ei = extra_index(ep);
+
+            if (calc->rmextra_turns[ei][i] > 0) {
+              if (num_activities > 0) {
+                astr_add(&str, "/");
+              }
+              astr_add(&str, _("Clean %s(%d)"),
+                       extra_name_translation(ep), calc->rmextra_turns[ei][i]);
+              num_activities++;
+            }
+          }
+        } extra_type_by_rmcause_iterate_end;
+      }
     } else if (is_tile_activity(i)) {
       if (calc->activity_turns[i] > 0) {
         if (num_activities > 0) {
@@ -285,7 +315,57 @@ const char *concat_tile_activity_text(struct tile *ptile)
     }
   } activity_type_iterate_end;
 
-  FC_FREE(calc);
+  free(calc);
 
   return astr_str(&str);
+}
+
+/************************************************************************//**
+  Add lines about the combat odds to the str.
+****************************************************************************/
+void combat_odds_to_astr(struct astring *str, struct unit_list *punits,
+                         const struct tile *ptile, const struct unit *punit,
+                         const char *pct_str)
+{
+  const struct unit_type *ptype = unit_type_get(punit);
+
+  unit_list_iterate(punits, pfocus) {
+    int att_chance = FC_INFINITY, def_chance = FC_INFINITY;
+    bool found = FALSE;
+
+    unit_list_iterate(ptile->units, tile_unit) {
+      if (unit_owner(tile_unit) != unit_owner(pfocus)) {
+        int att = unit_win_chance(pfocus, tile_unit, NULL) * 100;
+        int def = (1.0 - unit_win_chance(tile_unit, pfocus,
+                                         NULL)) * 100;
+
+        found = TRUE;
+
+        /* Presumably the best attacker and defender will be used. */
+        att_chance = MIN(att, att_chance);
+        def_chance = MIN(def, def_chance);
+      }
+    } unit_list_iterate_end;
+
+    if (found) {
+      /* TRANS: "Chance to win: A:95% D:46%" - "%s" are just the percent signs. */
+      astr_add_line(str, _("Chance to win: A:%d%s D:%d%s"),
+                    att_chance, pct_str, def_chance, pct_str);
+    }
+  } unit_list_iterate_end;
+
+  /* TRANS: A is attack power, D is defense power, FP is firepower,
+   * HP is hitpoints (current and max). */
+  astr_add_line(str, _("A:%d D:%d FP:%d HP:%d/%d"),
+                ptype->attack_strength, ptype->defense_strength,
+                ptype->firepower, punit->hp, ptype->hp);
+
+  {
+    const char *veteran_name =
+      utype_veteran_name_translation(ptype, punit->veteran);
+
+    if (veteran_name != NULL) {
+      astr_add(str, " (%s)", veteran_name);
+    }
+  }
 }

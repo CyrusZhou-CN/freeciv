@@ -14,12 +14,12 @@
 #ifndef FC__SHORTCUTSDLG_H
 #define FC__SHORTCUTSDLG_H
 
+// Qt
 #include <QDialog>
 #include <QLineEdit>
 #include <QPushButton>
 
 class QDialogButtonBox;
-class QSignalMapper;
 class QVBoxLayout;
 struct fc_shortcut;
 
@@ -27,8 +27,9 @@ void popup_shortcuts_dialog();
 QString shortcut_to_string(fc_shortcut *sc);
 void write_shortcuts();
 bool read_shortcuts();
+void shortcutreset();
 
-/* Assing numbers for casting */
+// Assign numbers for casting
 enum shortcut_id {
   SC_NONE = 0,
   SC_SCROLL_MAP = 1,
@@ -73,12 +74,12 @@ enum shortcut_id {
   SC_WAIT = 40,
   SC_TRANSFORM = 41,
   SC_NUKE = 42,
-  SC_LOAD = 43,
-  SC_UNLOAD = 44,
+  SC_BOARD = 43,
+  SC_DEBOARD = 44,
   SC_BUY_MAP = 45,
   SC_IFACE_LOCK = 46,
   SC_AUTOMATE = 47,
-  SC_PARADROP = 48,
+  SC_CLEAN = 48,
   SC_POPUP_COMB_INF = 49,
   SC_RELOAD_THEME = 50,
   SC_RELOAD_TILESET = 51,
@@ -89,8 +90,12 @@ enum shortcut_id {
   SC_RELOAD_LUA = 56,
   SC_ZOOM_RESET = 57,
   SC_GOBUILDCITY = 58,
-  SC_GOJOINCITY = 59
+  SC_GOJOINCITY = 59,
+  SC_STACK_SIZE = 60,
+  SC_PARADROP = 61
 };
+
+#define SC_NUM_SHORTCUTS 61
 
 
 /**************************************************************************
@@ -115,16 +120,17 @@ class fc_shortcuts
 {
   Q_DISABLE_COPY(fc_shortcuts);
   fc_shortcuts();
-  static fc_shortcuts* m_instance;
+  static fc_shortcuts *m_instance;
 
 public:
   ~fc_shortcuts();
-  static fc_shortcuts* sc();
+  static fc_shortcuts *sc();
+  static bool is_instantiated();
   static void drop();
   static QMap<shortcut_id, fc_shortcut*> hash;
 public:
   static void init_default(bool read);
-  fc_shortcut* get_shortcut(shortcut_id id);
+  fc_shortcut *get_shortcut(shortcut_id id);
   shortcut_id get_id(fc_shortcut *sc);
   void set_shortcut(fc_shortcut *sc);
   QString get_desc(shortcut_id id);
@@ -185,7 +191,6 @@ class fc_shortcuts_dialog : public  QDialog
   Q_OBJECT
   QVBoxLayout *main_layout;
   QVBoxLayout *scroll_layout;
-  QSignalMapper *signal_map;
   QDialogButtonBox *button_box;
   QMap<shortcut_id, fc_shortcut*> *hashcopy;
   void add_option(fc_shortcut *sc);
@@ -199,6 +204,4 @@ private slots:
   void edit_shortcut();
 };
 
-
-
-#endif /* FC__SHORTCUSDLG_H */
+#endif // FC__SHORTCUSDLG_H

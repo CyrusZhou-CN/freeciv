@@ -1,18 +1,15 @@
 # Detect Qt5 headers and libraries and set flag variables
 
-AC_ARG_VAR([MOCCMD], [QT 5 moc command (autodetected it if not set)])
-
 AC_DEFUN([FC_QT5],
 [
   if test "x$fc_qt5_usable" = "x" ; then
-    FC_QT5_CPPFLAGS="-DQT_DISABLE_DEPRECATED_BEFORE=0x050700"
-    case $host_os in 
+    FC_QT5_CPPFLAGS="-DQT_DISABLE_DEPRECATED_BEFORE=0x050b00"
+    case $host_os in
     darwin*) FC_QT5_DARWIN;;
     *) FC_QT5_GENERIC;;
     esac
   fi
 ])
- 
 
 AC_DEFUN([FC_QT5_GENERIC],
 [
@@ -65,7 +62,7 @@ AC_DEFUN([FC_QT5_GENERIC],
 
   if test "x$qt5_libs" = "xyes" ; then
     AC_MSG_RESULT([found])
-    AC_MSG_CHECKING([for Qt >= 5.11])
+    AC_MSG_CHECKING([for Qt5 >= 5.11])
     FC_QT5_VERSION_CHECK
   fi
 
@@ -98,9 +95,17 @@ AC_DEFUN([FC_QT5_COMPILETEST],
      CXXFLAGS="${CXXFLAGS} -fPIC"
      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <QApplication>]],
 [[int a; QApplication app(a, 0);]])],
-      [qt5_headers=yes
-       FC_QT5_CPPFLAGS="${FC_QT5_CPPFLAGS}${CPPFADD}"
-       FC_QT5_CXXFLAGS="${FC_QT5_CXXFLAGS} -fPIC"])
+       [qt5_headers=yes
+        FC_QT5_CPPFLAGS="${FC_QT5_CPPFLAGS}${CPPFADD}"
+        FC_QT5_CXXFLAGS="${FC_QT5_CXXFLAGS} -fPIC"
+        dnl So, Qt requires -fPIC. At the same time it might conflict with -fPIE
+        dnl Try to disable pie (but even if that fails, we have -fPIC)
+        dnl Only add -no-pie if it works also with -Werror
+        CXXFLAGS="${CXXFLAGS} -no-pie -Werror"
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <QApplication>]],
+[[int a; QApplication app(a, 0);]])],
+          [FC_QT5_CXXFLAGS="${FC_QT5_CXXFLAGS} -no-pie"])
+       ])
      CXXFLAGS="${CXXFLAGS_SAVE}"])
 
   CPPFLAGS="$CPPFLAGS_SAVE"
@@ -156,9 +161,10 @@ AC_DEFUN([FC_QT5_LINKTEST],
 
 dnl If $1 is Qt 5's moc command then $2 else $3
 AC_DEFUN([FC_QT5_IF_QT5_MOC],
-  AS_IF([test "`$1 -v 2<&1 | grep -o 'Qt [[[0-9]]]\+'`" = "Qt 5" ||
-         test "`$1 -v 2<&1 | grep -o 'moc [[[0-9]]]\+'`" = "moc 5" ||
-         test "`$1 -v 2<&1 | grep -o 'moc-qt[[[0-9]]]\+'`" = "moc-qt5"],
+  AS_IF([$1 -v >/dev/null 2>/dev/null &&
+         (test "`$1 -v 2<&1 | grep -o 'Qt [[[0-9]]]\+'`" = "Qt 5" ||
+          test "`$1 -v 2<&1 | grep -o 'moc [[[0-9]]]\+'`" = "moc 5" ||
+          test "`$1 -v 2<&1 | grep -o 'moc-qt[[[0-9]]]\+'`" = "moc-qt5")],
     [$2], [$3]))
 
 dnl Set MOCCMD to $1 if it is the Qt 5 "moc". If not run $2 parameter.
@@ -175,7 +181,8 @@ AC_DEFUN([FC_QT5_VALIDATE_MOC], [
   AS_IF([test "x$MOCCMD" = "x"],
     [FC_QT5_TRY_MOC([moc],
       [FC_QT5_TRY_MOC([qtchooser -run-tool=moc -qt=5],
-        [MOCCMD=""])])],
+        [FC_QT5_TRY_MOC([moc-qt5],
+          [MOCCMD=""])])])],
     [FC_QT5_TRY_MOC([$MOCCMD],
       AC_MSG_ERROR(["MOCCMD set to a bad value ($MOCCMD)"]))])
 

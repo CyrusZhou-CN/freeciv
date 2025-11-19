@@ -2,14 +2,14 @@
 [spec]
 
 ; Format and options of this spec file:
-options = "+Freeciv-spec-Devel-2019-Jul-03"
+options = "+Freeciv-spec-3.2-Devel-2023.Jan.01"
 
 [info]
 
 artists = "
     Tim F. Smith <yoohootim@hotmail.com>
     Andreas Røsdal <andrearo@pvv.ntnu.no> (hex mode)
-    Daniel Speyer <dspeyer@users.sf.net> 
+    Daniel Speyer <dspeyer@users.sf.net>
 "
 
 [file]

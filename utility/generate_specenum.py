@@ -14,7 +14,7 @@
 #
 
 # The maximum number of enumerators.
-max_enum_values=150
+max_enum_values=200
 
 # Here are push all defined macros.
 macros=[]
@@ -55,12 +55,12 @@ def make_documentation(file):
  *
  * The following macros *CAN* be defined:
  * - SPECENUM_INVALID: specifies a value that your 'foo_invalid()' function
- * will return.  Note it cannot be a declared value with SPECENUM_VALUE%d.
+ * will return. Note it cannot be a declared value with SPECENUM_VALUE%d.
  * - SPECENUM_BITWISE: defines if the enumeration should be like
  * [1, 2, 4, 8, etc...] instead of the default of [0, 1, 2, 3, etc...].
  * - SPECENUM_ZERO: can be defined only if SPECENUM_BITWISE was also defined.
  * It defines a 0 value. Note that if you don't declare this value, 0 passed
- * to the 'foo_is_valid()' function will return 0.
+ * to the 'foo_is_valid()' function will return FALSE.
  * - SPECENUM_COUNT: a name for the maximum enumeration number plus 1. For
  * enums where every element from 0 to the maximum is defined, this is the
  * number of elements in the enum. This value is suitable to size an array
@@ -76,8 +76,11 @@ def make_documentation(file):
  * mark a name as translatable use N_().
  *
  * SPECENUM_NAMEOVERRIDE: call callback function foo_name_cb(enum foo),
- * defined by specnum user, to get name of the enum value. If the function
+ * defined by specenum user, to get name of the enum value. If the function
  * returns NULL, compiled in names are used.
+ *
+ * SPECENUM_NAME_UPDATER: call callback function foo_name_update_cb(old_name),
+ * defined by specenum user, to get current name to search enum value with.
  *
  * SPECENUM_BITVECTOR: specifies the name of a bit vector for the enum
  * values. It can not be used in combination with SPECENUM_BITWISE.
@@ -149,7 +152,7 @@ def make_macros(file):
 extern "C" {
 #endif /* __cplusplus */
 
-/* Utility */
+/* utility */
 #include "fcintl.h"     /* translation */
 #include "log.h"        /* fc_assert. */
 #include "support.h"    /* bool type. */
@@ -206,6 +209,7 @@ extern "C" {
     macros.append("SPECENUM_MAX_VALUE")
     macros.append("SPECENUM_SIZE")
     macros.append("SPECENUM_NAMEOVERRIDE")
+    macros.append("SPECENUM_NAME_UPDATER")
     macros.append("SPECENUM_BITVECTOR")
 
 def make_enum(file):
@@ -248,7 +252,7 @@ enum SPECENUM_NAME {
 
 def make_is_bitwise(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns TRUE if this enumeration is in bitwise mode.
 **************************************************************************/
 fc__attribute((const))
@@ -264,7 +268,7 @@ static inline bool SPECENUM_FOO(_is_bitwise)(void)
 
 def make_min(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns the value of the minimal enumerator.
 **************************************************************************/
 fc__attribute((const))
@@ -276,7 +280,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_min)(void)
 
 def make_max(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns the value of the maximal enumerator.
 **************************************************************************/
 fc__attribute((const))
@@ -288,7 +292,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_max)(void)
 
 def make_is_valid(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns TRUE if this enumerator was defined.
 **************************************************************************/
 fc__attribute((const))
@@ -335,7 +339,7 @@ static inline bool SPECENUM_FOO(_is_valid)(enum SPECENUM_NAME enumerator)
   FC_STATIC_ASSERT(ARRAY_SIZE(valid) == SPECENUM_SIZE,
                    valid_array_size_check);
 
-  return (enumerator < ARRAY_SIZE(valid)
+  return ((unsigned)enumerator < ARRAY_SIZE(valid)
           && valid[enumerator]);
 #endif /* SPECENUM_BITWISE */
 }
@@ -343,7 +347,7 @@ static inline bool SPECENUM_FOO(_is_valid)(enum SPECENUM_NAME enumerator)
 
 def make_invalid(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns an invalid enumerator value.
 **************************************************************************/
 fc__attribute((const))
@@ -356,7 +360,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_invalid)(void)
 
 def make_begin(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Beginning of the iteration of the enumerators.
 **************************************************************************/
 fc__attribute((const))
@@ -368,7 +372,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_begin)(void)
 
 def make_end(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   End of the iteration of the enumerators.
 **************************************************************************/
 fc__attribute((const))
@@ -380,7 +384,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_end)(void)
 
 def make_next(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Find the next valid enumerator value.
 **************************************************************************/
 fc__attribute((const))
@@ -409,7 +413,7 @@ def make_name(file):
 const char *SPECENUM_FOO(_name_cb)(enum SPECENUM_NAME value);
 #endif /* SPECENUM_NAMEOVERRIDE */
 
-/**************************************************************************
+/**********************************************************************//**
   Returns the name of the enumerator.
 **************************************************************************/
 #ifndef SPECENUM_NAMEOVERRIDE
@@ -480,7 +484,7 @@ static inline const char *SPECENUM_FOO(_name)(enum SPECENUM_NAME enumerator)
     }
   }
 #else
-  if (enumerator < ARRAY_SIZE(names)) {
+  if ((unsigned)enumerator < ARRAY_SIZE(names)) {
     return names[enumerator];
   }
 #endif /* SPECENUM_BITWISE */
@@ -492,7 +496,7 @@ static inline const char *SPECENUM_FOO(_name)(enum SPECENUM_NAME enumerator)
 
 def make_by_name(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns the enumerator for the name or *_invalid() if not found.
 **************************************************************************/
 static inline enum SPECENUM_NAME SPECENUM_FOO(_by_name)
@@ -500,11 +504,16 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_by_name)
 {
   enum SPECENUM_NAME e;
   const char *enum_name;
+  const char *current_name = name;
+
+#ifdef SPECENUM_NAME_UPDATER
+  current_name = SPECENUM_FOO(_name_update_cb)(name);
+#endif
 
   for (e = SPECENUM_FOO(_begin)(); e != SPECENUM_FOO(_end)();
        e = SPECENUM_FOO(_next)(e)) {
     if ((enum_name = SPECENUM_FOO(_name)(e))
-        && 0 == strcmp_func(name, enum_name)) {
+        && 0 == strcmp_func(current_name, enum_name)) {
       return e;
     }
   }
@@ -515,7 +524,7 @@ static inline enum SPECENUM_NAME SPECENUM_FOO(_by_name)
 
 def make_translated_name(file):
     file.write('''
-/**************************************************************************
+/**********************************************************************//**
   Returns the translated name of the enumerator.
 **************************************************************************/
 #ifndef SPECENUM_NAMEOVERRIDE
@@ -587,7 +596,7 @@ SPECENUM_FOO(_translated_name)(enum SPECENUM_NAME enumerator)
     }
   }
 #else
-  if (enumerator < ARRAY_SIZE(names)) {
+  if ((unsigned)enumerator < ARRAY_SIZE(names)) {
     return names[enumerator];
   }
 #endif /* SPECENUM_BITWISE */

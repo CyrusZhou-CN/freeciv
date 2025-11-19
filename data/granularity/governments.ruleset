@@ -11,9 +11,9 @@
 ; than minor changes.
 
 [datafile]
-description="Granularity governments data for Freeciv"
-options="+Freeciv-ruleset-Devel-2017.Jan.02"
-format_version=20
+description = "Granularity governments data for Freeciv"
+options = "+Freeciv-ruleset-3.2-Devel-2022.Feb.02"
+format_version = 30
 
 [governments]
 during_revolution = "Anarchy"
@@ -27,7 +27,7 @@ during_revolution = "Anarchy"
 ; output when reading this file.
 ;
 ; For the "official" rulesets, the order of these sections should not
-; be changed because that would break backward compatability with
+; be changed because that would break backward compatibility with
 ; savegames.  (In particular, if Fundamentalism is added to default
 ; ruleset, should be added at end.)
 ;
@@ -74,18 +74,18 @@ Anarchy happens between government changes.\
 ")
 
 ;------------------------------------------------------------------------
-[government_generic]
+[government_tribal]
 
-name        = _("Generic")
+name        = _("Tribal")
 reqs =
    { "type", "name", "range"
 ; No requirements
    }
-graphic     = "gov.despotism"
+graphic     = "gov.tribal"
 graphic_alt = "-"
 
-ruler_male_title = _("Leader %s")
-ruler_female_title = _("Leader %s")
+ruler_male_title = _("Warlord %s")
+ruler_female_title = _("Warlady %s")
 
 helptext = _("\
   This is the only available form of government.\
@@ -111,6 +111,8 @@ helptext = _("\
 ;                           effect_value = (ui_value + offset) * (factor/100)
 ;                           Optional; by default offset=0, factor=100, so
 ;                           that UI values are used as-is.
+; minimum_turns           = how often multiplier can be changed, or: how long one is stuck
+;                           with the given value after changing to it
 ; reqs                    = requirements for adjusting this policy (see README.effects)
 ; helptext                = optional help text string; should escape all raw
 ;                           newlines so that xgettext parsing works

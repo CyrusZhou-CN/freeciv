@@ -9,12 +9,13 @@
 ; use your new customized file.
 
 [datafile]
-description="Alien World nations data for Freeciv"
-options="+Freeciv-ruleset-Devel-2017.Jan.02"
-format_version=20
+description = "Alien World nations data for Freeciv"
+options = "+Freeciv-ruleset-3.2-Devel-2022.Feb.02"
+format_version = 30
 
-; This section contains meta information for freeciv-ruledit to recreate the ruleset
-; file in a form wanted. These have no in-game effect whatsoever
+; This section contains meta information for freeciv-ruledit and freeciv-ruleup
+; to recreate the ruleset file in a form wanted.
+; These have no in-game effect whatsoever.
 [ruledit]
 
 ; Nationlist to add include statement for. If this entry is omitted, all the nations
@@ -85,8 +86,8 @@ default_government = "Despotism"
 ; description   = Optional short user description of this set.
 
 [nset_all]
-name=_("All nations")
-rule_name="all"
+name = _("All nations")
+rule_name = "all"
 
 ; Descriptions of nation groups
 ; These are more cosmetic than sets; they affect the "pick nation" dialog,
@@ -100,9 +101,9 @@ rule_name="all"
 ;                 group
 
 [ngroup_barbarian]
-name=_("?nationgroup:Barbarian")
-match=0
-hidden=true
+name = _("?nationgroup:Barbarian")
+match = 0
+hidden = true
 
 *include "alien/nation/mathclub.ruleset"
 *include "alien/nation/secretsociety.ruleset"

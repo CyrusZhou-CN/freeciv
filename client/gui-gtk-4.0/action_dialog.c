@@ -42,6 +42,7 @@
 #include "gui_stuff.h"
 #include "mapview.h"
 #include "packhand.h"
+#include "text.h"
 
 /* client/gui-gtk-4.0 */
 #include "citydlg.h"
@@ -51,13 +52,12 @@
 #include "wldlg.h"
 
 /* Locations for non action enabler controlled buttons. */
-#define BUTTON_MOVE ACTION_COUNT
-#define BUTTON_NEW_UNIT_TGT BUTTON_MOVE + 1
-#define BUTTON_NEW_EXTRA_TGT BUTTON_MOVE + 2
-#define BUTTON_LOCATION BUTTON_MOVE + 3
-#define BUTTON_WAIT BUTTON_MOVE + 4
-#define BUTTON_CANCEL BUTTON_MOVE + 5
-#define BUTTON_COUNT BUTTON_MOVE + 6
+#define BUTTON_NEW_UNIT_TGT (ACTION_COUNT + 1)
+#define BUTTON_NEW_EXTRA_TGT (BUTTON_NEW_UNIT_TGT + 1)
+#define BUTTON_LOCATION (BUTTON_NEW_EXTRA_TGT + 1)
+#define BUTTON_WAIT (BUTTON_LOCATION + 1)
+#define BUTTON_CANCEL (BUTTON_WAIT + 1)
+#define BUTTON_COUNT (BUTTON_CANCEL + 1)
 
 #define BUTTON_NOT_THERE -1
 
@@ -76,7 +76,7 @@ static GtkWidget  *spy_tech_shell;
 
 static GtkWidget  *spy_sabotage_shell;
 
-/* A structure to hold parameters for actions inside the GUI in stead of
+/* A structure to hold parameters for actions inside the GUI instead of
  * storing the needed data in a global variable. */
 struct action_data {
   action_id act_id;
@@ -121,7 +121,7 @@ static struct action_data *act_data(action_id act_id,
 
 /**********************************************************************//**
   Move the queue of units that need user input forward unless the current
-  unit are going to need more input.
+  unit is going to need more input.
 **************************************************************************/
 static void diplomat_queue_handle_primary(void)
 {
@@ -167,12 +167,12 @@ static void diplomat_queue_handle_primary(void)
 }
 
 /**********************************************************************//**
-  Move the queue of diplomats that need user input forward since the
-  current diplomat got the extra input that was required.
+  Move the queue of units that need user input forward since the
+  current unit doesn't require the extra input any more.
 **************************************************************************/
 static void diplomat_queue_handle_secondary(void)
 {
-  /* Stop waiting. Move on to the next queued diplomat. */
+  /* Stop waiting. Move on to the next queued unit. */
   is_more_user_input_needed = FALSE;
   diplomat_queue_handle_primary();
 }
@@ -277,6 +277,7 @@ static void simple_action_callback(GtkWidget *w, gpointer data)
     break;
   case ATK_UNITS:
   case ATK_TILE:
+  case ATK_EXTRAS:
     target_id = args->target_tile_id;
     if (NULL == index_to_tile(&(wld.map), target_id)) {
       /* TODO: Should this be possible at all? If not: add assertion. */
@@ -292,7 +293,7 @@ static void simple_action_callback(GtkWidget *w, gpointer data)
   }
 
   /* Sub target. */
-  sub_target = IDENTITY_NUMBER_ZERO;
+  sub_target = NO_TARGET;
   if (paction->target_complexity != ACT_TGT_COMPL_SIMPLE) {
     switch (action_get_sub_target_kind(paction)) {
     case ASTK_BUILDING:
@@ -333,7 +334,7 @@ static void simple_action_callback(GtkWidget *w, gpointer data)
   }
 
   /* Clean up. */
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   /* No follow up questions. */
   act_sel_dialog_data = NULL;
   FC_FREE(args);
@@ -383,6 +384,7 @@ static void request_action_details_callback(GtkWidget *w, gpointer data)
     break;
   case ATK_UNITS:
   case ATK_TILE:
+  case ATK_EXTRAS:
     target_id = args->target_tile_id;
     if (NULL == index_to_tile(&(wld.map), target_id)) {
       /* TODO: Should this be possible at all? If not: add assertion. */
@@ -407,7 +409,7 @@ static void request_action_details_callback(GtkWidget *w, gpointer data)
   is_more_user_input_needed = TRUE;
 
   /* Clean up. */
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   /* No client side follow up questions. */
   act_sel_dialog_data = NULL;
   FC_FREE(args);
@@ -423,7 +425,7 @@ static void found_city_callback(GtkWidget *w, gpointer data)
   dsend_packet_city_name_suggestion_req(&client.conn,
                                         args->actor_unit_id);
 
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(args);
 }
 
@@ -446,27 +448,8 @@ static void upgrade_callback(GtkWidget *w, gpointer data)
     unit_list_destroy(as_list);
   }
 
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(args);
-}
-
-/**********************************************************************//**
-  Returns a string with how many shields remains of the current production.
-  This is useful as custom information on the help build wonder button.
-**************************************************************************/
-static const gchar *city_prod_remaining(struct city* destcity)
-{
-  if (destcity == NULL
-      || city_owner(destcity) != client.conn.playing) {
-    /* Can't give remaining production for a foreign or non existing
-     * city. */
-    return NULL;
-  }
-
-  return g_strdup_printf(_("%d remaining"),
-                         impr_build_shield_cost(destcity,
-                                                destcity->production.value.building)
-                         - destcity->shield_stock);
 }
 
 /**********************************************************************//**
@@ -481,7 +464,7 @@ static void bribe_response(GtkWidget *w, gint response, gpointer data)
                       args->target_unit_id, 0, "");
   }
 
-  gtk_widget_destroy(w);
+  gtk_window_destroy(GTK_WINDOW(w));
   free(args);
 
   /* The user have answered the follow up question. Move on. */
@@ -520,7 +503,7 @@ void popup_bribe_dialog(struct unit *actor, struct unit *punit, int cost,
     setup_dialog(shell, toplevel);
   }
   gtk_window_present(GTK_WINDOW(shell));
-  
+
   g_signal_connect(shell, "response", G_CALLBACK(bribe_response),
                    act_data(paction->id, actor->id,
                             0, punit->id, 0,
@@ -552,7 +535,7 @@ static void spy_advances_response(GtkWidget *w, gint response,
     }
   }
 
-  gtk_widget_destroy(spy_tech_shell);
+  gtk_window_destroy(GTK_WINDOW(spy_tech_shell));
   spy_tech_shell = NULL;
   free(data);
 
@@ -573,12 +556,12 @@ static void spy_advances_callback(GtkTreeSelection *select,
 
   if (gtk_tree_selection_get_selected(select, &model, &it)) {
     gtk_tree_model_get(model, &it, 1, &(args->target_tech_id), -1);
-    
+
     gtk_dialog_set_response_sensitive(GTK_DIALOG(spy_tech_shell),
       GTK_RESPONSE_ACCEPT, TRUE);
   } else {
     args->target_tech_id = 0;
-	  
+
     gtk_dialog_set_response_sensitive(GTK_DIALOG(spy_tech_shell),
       GTK_RESPONSE_ACCEPT, FALSE);
   }
@@ -590,8 +573,8 @@ static void spy_advances_callback(GtkTreeSelection *select,
 static void create_advances_list(struct player *pplayer,
 				 struct player *pvictim,
 				 struct action_data *args)
-{  
-  GtkWidget *sw, *label, *vbox, *view;
+{
+  GtkWidget *sw, *frame, *label, *vgrid, *view;
   GtkListStore *store;
   GtkCellRenderer *rend;
   GtkTreeViewColumn *col;
@@ -604,20 +587,19 @@ static void create_advances_list(struct player *pplayer,
                                                _("_Steal"), GTK_RESPONSE_ACCEPT,
                                                NULL);
   setup_dialog(spy_tech_shell, toplevel);
-  gtk_window_set_position(GTK_WINDOW(spy_tech_shell), GTK_WIN_POS_MOUSE);
 
   gtk_dialog_set_default_response(GTK_DIALOG(spy_tech_shell),
 				  GTK_RESPONSE_ACCEPT);
 
-  label = gtk_frame_new(_("Select Advance to Steal"));
-  gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(spy_tech_shell))), label);
+  frame = gtk_frame_new(_("Select Advance to Steal"));
+  gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(spy_tech_shell))), frame);
 
-  vbox = gtk_grid_new();
-  gtk_orientable_set_orientation(GTK_ORIENTABLE(vbox),
+  vgrid = gtk_grid_new();
+  gtk_orientable_set_orientation(GTK_ORIENTABLE(vgrid),
                                  GTK_ORIENTATION_VERTICAL);
-  gtk_grid_set_row_spacing(GTK_GRID(vbox), 6);
-  gtk_container_add(GTK_CONTAINER(label), vbox);
-      
+  gtk_grid_set_row_spacing(GTK_GRID(vgrid), 6);
+  gtk_frame_set_child(GTK_FRAME(frame), vgrid);
+
   store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
 
   view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
@@ -638,18 +620,17 @@ static void create_advances_list(struct player *pplayer,
     "xalign", 0.0,
     "yalign", 0.5,
     NULL);
-  gtk_container_add(GTK_CONTAINER(vbox), label);
-  
-  sw = gtk_scrolled_window_new(NULL, NULL);
-  gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(sw),
-				      GTK_SHADOW_ETCHED_IN);
-  gtk_container_add(GTK_CONTAINER(sw), view);
+  gtk_grid_attach(GTK_GRID(vgrid), label, 0, 0, 1, 1);
+
+  sw = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(sw), TRUE);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), view);
 
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
   gtk_widget_set_size_request(sw, -1, 200);
-  
-  gtk_container_add(GTK_CONTAINER(vbox), sw);
+
+  gtk_grid_attach(GTK_GRID(vgrid), sw, 0, 1, 1, 1);
 
   /* Now populate the list */
   if (pvictim) { /* you don't want to know what lag can do -- Syela */
@@ -695,14 +676,14 @@ static void create_advances_list(struct player *pplayer,
 
   gtk_dialog_set_response_sensitive(GTK_DIALOG(spy_tech_shell),
     GTK_RESPONSE_ACCEPT, FALSE);
-  
+
   gtk_widget_show(gtk_dialog_get_content_area(GTK_DIALOG(spy_tech_shell)));
 
   g_signal_connect(gtk_tree_view_get_selection(GTK_TREE_VIEW(view)), "changed",
                    G_CALLBACK(spy_advances_callback), args);
   g_signal_connect(spy_tech_shell, "response",
                    G_CALLBACK(spy_advances_response), args);
-  
+
   args->target_tech_id = 0;
 
   gtk_tree_view_focus(GTK_TREE_VIEW(view));
@@ -740,7 +721,7 @@ static void spy_improvements_response(GtkWidget *w, gint response, gpointer data
     }
   }
 
-  gtk_widget_destroy(spy_sabotage_shell);
+  gtk_window_destroy(GTK_WINDOW(spy_sabotage_shell));
   spy_sabotage_shell = NULL;
   free(args);
 
@@ -760,12 +741,12 @@ static void spy_improvements_callback(GtkTreeSelection *select, gpointer data)
 
   if (gtk_tree_selection_get_selected(select, &model, &it)) {
     gtk_tree_model_get(model, &it, 1, &(args->target_building_id), -1);
-    
+
     gtk_dialog_set_response_sensitive(GTK_DIALOG(spy_sabotage_shell),
       GTK_RESPONSE_ACCEPT, TRUE);
   } else {
     args->target_building_id = -2;
-	  
+
     gtk_dialog_set_response_sensitive(GTK_DIALOG(spy_sabotage_shell),
       GTK_RESPONSE_ACCEPT, FALSE);
   }
@@ -777,35 +758,34 @@ static void spy_improvements_callback(GtkTreeSelection *select, gpointer data)
 static void create_improvements_list(struct player *pplayer,
 				     struct city *pcity,
 				     struct action_data *args)
-{  
-  GtkWidget *sw, *label, *vbox, *view;
+{
+  GtkWidget *sw, *frame, *label, *vgrid, *view;
   GtkListStore *store;
   GtkCellRenderer *rend;
   GtkTreeViewColumn *col;
   GtkTreeIter it;
 
   struct unit *actor_unit = game_unit_by_number(args->actor_unit_id);
-  
+
   spy_sabotage_shell = gtk_dialog_new_with_buttons(_("Sabotage Improvements"),
                                                    NULL, 0,
                                                    _("_Cancel"), GTK_RESPONSE_CANCEL,
                                                    _("_Sabotage"), GTK_RESPONSE_ACCEPT,
                                                    NULL);
   setup_dialog(spy_sabotage_shell, toplevel);
-  gtk_window_set_position(GTK_WINDOW(spy_sabotage_shell), GTK_WIN_POS_MOUSE);
 
   gtk_dialog_set_default_response(GTK_DIALOG(spy_sabotage_shell),
 				  GTK_RESPONSE_ACCEPT);
 
-  label = gtk_frame_new(_("Select Improvement to Sabotage"));
-  gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(spy_sabotage_shell))), label);
+  frame = gtk_frame_new(_("Select Improvement to Sabotage"));
+  gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(spy_sabotage_shell))), frame);
 
-  vbox = gtk_grid_new();
-  gtk_orientable_set_orientation(GTK_ORIENTABLE(vbox),
+  vgrid = gtk_grid_new();
+  gtk_orientable_set_orientation(GTK_ORIENTABLE(vgrid),
                                  GTK_ORIENTATION_VERTICAL);
-  gtk_grid_set_row_spacing(GTK_GRID(vbox), 6);
-  gtk_container_add(GTK_CONTAINER(label), vbox);
-      
+  gtk_grid_set_row_spacing(GTK_GRID(vgrid), 6);
+  gtk_frame_set_child(GTK_FRAME(frame), vgrid);
+
   store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
 
   view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
@@ -826,18 +806,17 @@ static void create_improvements_list(struct player *pplayer,
     "xalign", 0.0,
     "yalign", 0.5,
     NULL);
-  gtk_container_add(GTK_CONTAINER(vbox), label);
-  
-  sw = gtk_scrolled_window_new(NULL, NULL);
-  gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(sw),
-				      GTK_SHADOW_ETCHED_IN);
-  gtk_container_add(GTK_CONTAINER(sw), view);
+  gtk_grid_attach(GTK_GRID(vgrid), label, 0, 0, 1, 1);
+
+  sw = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(sw), TRUE);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), view);
 
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
   gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(sw), 200);
-  
-  gtk_container_add(GTK_CONTAINER(vbox), sw);
+
+  gtk_grid_attach(GTK_GRID(vgrid), sw, 0, 1, 1, 1);
 
   /* Now populate the list */
   if (action_prob_possible(actor_unit->client.act_prob_cache[
@@ -854,7 +833,7 @@ static void create_improvements_list(struct player *pplayer,
                          0, city_improvement_name_translation(pcity, pimprove),
                          1, improvement_number(pimprove),
                          -1);
-    }  
+    }
   } city_built_iterate_end;
 
   if (action_prob_possible(actor_unit->client.act_prob_cache[
@@ -882,7 +861,7 @@ static void create_improvements_list(struct player *pplayer,
                    G_CALLBACK(spy_improvements_response), args);
 
   args->target_building_id = -2;
-	  
+
   gtk_tree_view_focus(GTK_TREE_VIEW(view));
 }
 
@@ -918,7 +897,7 @@ pvictim to NULL and account for !pvictim in create_advances_list. -- Syela */
    * needs to know what action to take. */
   is_more_user_input_needed = TRUE;
 
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
 }
 
 /**********************************************************************//**
@@ -970,7 +949,7 @@ static void incite_response(GtkWidget *w, gint response, gpointer data)
                       args->target_city_id, 0, "");
   }
 
-  gtk_widget_destroy(w);
+  gtk_window_destroy(GTK_WINDOW(w));
   free(args);
 
   /* The user have answered the follow up question. Move on. */
@@ -1017,7 +996,7 @@ void popup_incite_dialog(struct unit *actor, struct city *pcity, int cost,
     setup_dialog(shell, toplevel);
   }
   gtk_window_present(GTK_WINDOW(shell));
-  
+
   g_signal_connect(shell, "response", G_CALLBACK(incite_response),
                    act_data(paction->id, actor->id,
                             pcity->id, 0, 0,
@@ -1049,14 +1028,14 @@ static void tgt_unit_change_callback(GtkWidget *dlg, gint arg)
                                       IDENTITY_NUMBER_ZERO,
                                       tgt_tile->index,
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       } else {
         dsend_packet_unit_get_actions(&client.conn,
                                       actor->id,
                                       tgt_id,
                                       tgt_tile->index,
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       }
     }
   } else {
@@ -1064,7 +1043,7 @@ static void tgt_unit_change_callback(GtkWidget *dlg, gint arg)
     action_selection_no_longer_in_progress(au_id);
   }
 
-  gtk_widget_destroy(dlg);
+  gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
 /**********************************************************************//**
@@ -1091,7 +1070,7 @@ static void act_sel_new_unit_tgt_callback(GtkWidget *w, gpointer data)
 
   did_not_decide = TRUE;
   action_selection_restart = TRUE;
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(args);
 }
 
@@ -1120,14 +1099,14 @@ static void tgt_extra_change_callback(GtkWidget *dlg, gint arg)
                                       /* Let the server choose the target
                                        * extra. */
                                       action_selection_target_extra(),
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       } else {
         dsend_packet_unit_get_actions(&client.conn,
                                       actor->id,
                                       action_selection_target_unit(),
                                       tgt_tile->index,
                                       tgt_id,
-                                      TRUE);
+                                      REQEST_PLAYER_INITIATED);
       }
     }
   } else {
@@ -1135,7 +1114,7 @@ static void tgt_extra_change_callback(GtkWidget *dlg, gint arg)
     action_selection_no_longer_in_progress(au_id);
   }
 
-  gtk_widget_destroy(dlg);
+  gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
 /**********************************************************************//**
@@ -1160,22 +1139,14 @@ static void act_sel_new_extra_tgt_callback(GtkWidget *w, gpointer data)
     extra_type_re_active_iterate(pextra) {
       if (BV_ISSET(potential_targets, extra_number(pextra))) {
         /* This extra is at the tile. Can anything be done to it? */
-        if (!(is_extra_removed_by(pextra, ERM_PILLAGE)
-              && unit_can_do_action(act_unit, ACTION_PILLAGE))) {
-          /* TODO: add more extra removal actions as they appear. */
+        if (!utype_can_remove_extra(unit_type_get(act_unit),
+                                    pextra)) {
           BV_CLR(potential_targets, extra_number(pextra));
         }
       } else {
         /* This extra isn't at the tile yet. Can it be created? */
-        if (pextra->buildable
-            && ((is_extra_caused_by(pextra, EC_IRRIGATION)
-                 && unit_can_do_action(act_unit, ACTION_IRRIGATE))
-                || (is_extra_caused_by(pextra, EC_MINE)
-                    && unit_can_do_action(act_unit, ACTION_MINE))
-                || (is_extra_caused_by(pextra, EC_BASE)
-                    && unit_can_do_action(act_unit, ACTION_BASE))
-                || (is_extra_caused_by(pextra, EC_ROAD)
-                    && unit_can_do_action(act_unit, ACTION_ROAD)))) {
+        if (utype_can_create_extra(unit_type_get(act_unit),
+                                   pextra)) {
           BV_SET(potential_targets, extra_number(pextra));
         }
       }
@@ -1197,7 +1168,7 @@ static void act_sel_new_extra_tgt_callback(GtkWidget *w, gpointer data)
 
   did_not_decide = TRUE;
   action_selection_restart = TRUE;
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(args);
 }
 
@@ -1213,28 +1184,6 @@ static void act_sel_location_callback(GtkWidget *w, gpointer data)
   if ((punit = game_unit_by_number(args->actor_unit_id))) {
     center_tile_mapcanvas(unit_tile(punit));
   }
-}
-
-/**********************************************************************//**
-  Callback from action selection dialog for "keep moving".
-  (This should only occur when entering a tile that has an allied city or
-  an allied unit.)
-**************************************************************************/
-static void act_sel_keep_moving_callback(GtkWidget *w, gpointer data)
-{
-  struct action_data *args = act_sel_dialog_data;
-
-  struct unit *punit;
-  struct tile *ptile;
-
-  if ((punit = game_unit_by_number(args->actor_unit_id))
-      && (ptile = index_to_tile(&(wld.map), args->target_tile_id))
-      && !same_pos(unit_tile(punit), ptile)) {
-    request_unit_non_action_move(punit, ptile);
-  }
-
-  gtk_widget_destroy(act_sel_dialog);
-  free(args);
 }
 
 /**********************************************************************//**
@@ -1266,18 +1215,16 @@ static void act_sel_destroy_callback(GtkWidget *w, gpointer data)
 **************************************************************************/
 static void act_sel_cancel_callback(GtkWidget *w, gpointer data)
 {
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(act_sel_dialog_data);
 }
 
 /**********************************************************************//**
   Action selection dialog has been closed
 **************************************************************************/
-static void act_sel_close_callback(GtkWidget *w,
-                                   gint response_id,
-                                   gpointer data)
+static void act_sel_close_callback(GtkWidget *w, gpointer data)
 {
-  gtk_widget_destroy(act_sel_dialog);
+  choice_dialog_destroy(act_sel_dialog);
   free(act_sel_dialog_data);
 }
 
@@ -1316,7 +1263,7 @@ static const GCallback af_map[ACTION_COUNT] = {
 static void action_entry(GtkWidget *shl,
                          action_id act_id,
                          const struct act_prob *act_probs,
-                         const gchar *custom,
+                         const char *custom,
                          action_id act_num)
 {
   const gchar *label;
@@ -1340,8 +1287,8 @@ static void action_entry(GtkWidget *shl,
                                  act_probs[act_id],
                                  custom);
 
-  tooltip = action_get_tool_tip(act_id,
-                                act_probs[act_id]);
+  tooltip = act_sel_action_tool_tip(action_by_number(act_id),
+                                    act_probs[act_id]);
 
   action_button_map[act_id] = choice_dialog_get_number_of_buttons(shl);
   choice_dialog_add(shl, label, cb, GINT_TO_POINTER(act_num),
@@ -1354,7 +1301,7 @@ static void action_entry(GtkWidget *shl,
 static void action_entry_update(GtkWidget *shl,
                                 action_id act_id,
                                 const struct act_prob *act_probs,
-                                const gchar *custom,
+                                const char *custom,
                                 action_id act_num)
 {
   const gchar *label;
@@ -1370,8 +1317,8 @@ static void action_entry_update(GtkWidget *shl,
   label = action_prepare_ui_name(act_id, "_",
                                  act_probs[act_id], custom);
 
-  tooltip = action_get_tool_tip(act_id,
-                                act_probs[act_id]);
+  tooltip = act_sel_action_tool_tip(action_by_number(act_id),
+                                    act_probs[act_id]);
 
   choice_dialog_button_set_label(act_sel_dialog,
                                  action_button_map[act_id],
@@ -1437,6 +1384,9 @@ void popup_action_selection(struct unit *actor_unit,
   target_ids[ATK_TILE] = target_tile ?
                          tile_index(target_tile) :
                          TILE_INDEX_NONE;
+  target_ids[ATK_EXTRAS] = target_tile ?
+                           tile_index(target_tile) :
+                           TILE_INDEX_NONE;
   target_extra_id      = target_extra ?
                          extra_number(target_extra) :
                          EXTRA_NONE;
@@ -1482,8 +1432,10 @@ void popup_action_selection(struct unit *actor_unit,
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_CITY) {
       action_entry(shl, act, act_probs,
-                   act == ACTION_HELP_WONDER ?
-                     city_prod_remaining(target_city) : NULL,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
                    act);
     }
   } action_iterate_end;
@@ -1493,7 +1445,12 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_UNIT) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1502,7 +1459,12 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_UNITS) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1511,7 +1473,26 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_TILE) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
+    }
+  } action_iterate_end;
+
+  /* Unit acting against a tile's extras */
+
+  action_iterate(act) {
+    if (action_id_get_actor_kind(act) == AAK_UNIT
+        && action_id_get_target_kind(act) == ATK_EXTRAS) {
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
 
@@ -1520,18 +1501,14 @@ void popup_action_selection(struct unit *actor_unit,
   action_iterate(act) {
     if (action_id_get_actor_kind(act) == AAK_UNIT
         && action_id_get_target_kind(act) == ATK_SELF) {
-      action_entry(shl, act, act_probs, NULL, act);
+      action_entry(shl, act, act_probs,
+                   get_act_sel_action_custom_text(action_by_number(act),
+                                                  act_probs[act],
+                                                  actor_unit,
+                                                  target_city),
+                   act);
     }
   } action_iterate_end;
-
-  if (unit_can_move_to_tile(&(wld.map), actor_unit, target_tile,
-                            FALSE, FALSE)) {
-    action_button_map[BUTTON_MOVE] =
-        choice_dialog_get_number_of_buttons(shl);
-    choice_dialog_add(shl, _("_Keep moving"),
-                      (GCallback)act_sel_keep_moving_callback,
-                      GINT_TO_POINTER(ACTION_NONE), FALSE, NULL);
-  }
 
   if (target_unit != NULL
       && unit_list_size(target_tile->units) > 1) {
@@ -1578,7 +1555,7 @@ void popup_action_selection(struct unit *actor_unit,
   choice_dialog_set_hide(shl, TRUE);
   g_signal_connect(shl, "destroy",
                    G_CALLBACK(act_sel_destroy_callback), NULL);
-  g_signal_connect(shl, "delete_event",
+  g_signal_connect(shl, "close-request",
                    G_CALLBACK(act_sel_close_callback),
                    GINT_TO_POINTER(ACTION_NONE));
 
@@ -1702,20 +1679,17 @@ void action_selection_refresh(struct unit *actor_unit,
   }
 
   action_iterate(act) {
-    const gchar *custom;
+    const char *custom;
 
     if (action_id_get_actor_kind(act) != AAK_UNIT) {
       /* Not relevant. */
       continue;
     }
 
-    if (action_prob_possible(act_probs[act])
-        && act == ACTION_HELP_WONDER) {
-      /* Add information about how far along the wonder is. */
-      custom = city_prod_remaining(target_city);
-    } else {
-      custom = NULL;
-    }
+    custom = get_act_sel_action_custom_text(action_by_number(act),
+                                            act_probs[act],
+                                            actor_unit,
+                                            target_city);
 
     if (BUTTON_NOT_THERE == action_button_map[act]) {
       /* Add the button (unless its probability is 0). */
@@ -1753,6 +1727,6 @@ void action_selection_close(void)
 {
   if (act_sel_dialog != NULL) {
     did_not_decide = TRUE;
-    gtk_widget_destroy(act_sel_dialog);
+    choice_dialog_destroy(act_sel_dialog);
   }
 }

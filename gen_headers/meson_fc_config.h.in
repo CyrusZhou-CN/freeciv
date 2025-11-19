@@ -10,8 +10,8 @@
 
 #define LOCALEDIR "@LOCALEDIR@"
 
-#define BUG_URL "https://www.hostedredmine.com/projects/freeciv"
-#define WIKI_URL "http://www.freeciv.org/"
+#define BUG_URL "https://osdn.net/projects/freeciv/ticket/"
+#define HOMEPAGE_URL "https://www.freeciv.org/"
 
 #define DATASUBDIR "@DATASUBDIR@"
 
@@ -20,23 +20,43 @@
 #define AI_MOD_STATIC_CLASSIC
 #define AI_MOD_STATIC_TEX
 
-#define DEFAULT_SOCK_PORT 5556
+#mesondefine DEFAULT_SOCK_PORT
 
 #define INIT_BRACE_BEGIN {
 #define INIT_BRACE_END   }
 
-#define DEFAULT_DATA_PATH ".:data:@FREECIV_STORAGE_DIR@/" DATASUBDIR ":@DATADIR@/freeciv"
-#define DEFAULT_SAVE_PATH ".:@FREECIV_STORAGE_DIR@/saves"
-#define DEFAULT_SCENARIO_PATH ".:data/scenarios:@FREECIV_STORAGE_DIR@/" DATASUBDIR "/scenarios:@FREECIV_STORAGE_DIR@/scenarios:@DATADIR@/freeciv/scenarios"
+#mesondefine DEFAULT_DATA_PATH
+#mesondefine DEFAULT_SAVE_PATH
+#mesondefine DEFAULT_SCENARIO_PATH
 
 #define MPICON_PATH "@DATADIR@/freeciv/misc/mpicon.png"
 
 #define BINDIR "@BINDIR@"
 
+#define FC_CONF_PATH "@SYSCONFDIR@/freeciv"
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+
+/* Processor stores words with the most significant byte first */
+#mesondefine WORDS_BIGENDIAN
+
+/* Database backend available */
+#define HAVE_FCDB 1
+
+/* Have Sqlite3 database backend */
+#define HAVE_FCDB_SQLITE3 1
+
+/* Build in Qt5 mode */
+#mesondefine FC_QT5_MODE
 
 /* Release cycle information */
 #mesondefine IS_DEVEL_VERSION
+#mesondefine IS_FREEZE_VERSION
+#mesondefine IS_BETA_VERSION
+#mesondefine FREECIV_RELEASE_MONTH
+#mesondefine NEXT_STABLE_VERSION
 
 /* Produce debug version */
 #mesondefine FREECIV_DEBUG
@@ -44,14 +64,29 @@
 /* enable audio */
 #mesondefine AUDIO_SDL
 
-/* audio via SDL2_mixer */
-#mesondefine AUDIO_SDL2
+/* Native language support enabled */
+#mesondefine ENABLE_NLS
+
+/* Include git commit id to version string */
+#mesondefine GITREV
+
+/* Format specifier for size_t */
+#mesondefine SIZE_T_PRINTF
+
+/* Can run programs as root */
+#mesondefine ALWAYS_ROOT
+
+/* Have magickwand mapimg toolkit */
+#mesondefine HAVE_MAPIMG_MAGICKWAND
 
 /* struct ip_mreqn available */
-#define HAVE_IP_MREQN 1
+#mesondefine HAVE_IP_MREQN
 
 /* arpa/inet.h available */
 #mesondefine HAVE_ARPA_INET_H
+
+/* bcrypt.h available */
+#mesondefine HAVE_BCRYPT_H
 
 /* bzlib.h available */
 #mesondefine HAVE_BZLIB_H
@@ -68,14 +103,20 @@
 /* fcntl.h available */
 #mesondefine HAVE_FCNTL_H
 
-/* libcharset.h available */
-#mesondefine HAVE_LIBCHARSET_H
+/* time.h available */
+#mesondefine HAVE_TIME_H
+
+/* libcharset.h and locale_charset() available */
+#mesondefine HAVE_LIBCHARSET
 
 /* libgen.h available */
 #mesondefine HAVE_LIBGEN_H
 
 /* lzma.h available */
 #mesondefine HAVE_LZMA_H
+
+/* zstd.h available */
+#mesondefine HAVE_ZSTD_H
 
 /* memory.h available */
 #mesondefine HAVE_MEMORY_H
@@ -103,6 +144,9 @@
 
 /* sys/ioctl.h available */
 #mesondefine HAVE_SYS_IOCTL_H
+
+/* sys/random.h available */
+#mesondefine HAVE_SYS_RANDOM_H
 
 /* sys/signal.h available */
 #mesondefine HAVE_SYS_SIGNAL_H
@@ -183,10 +227,20 @@
 #define HAVE_WORKING_VFORK 1
 #endif
 
+/* Define if there's vsnprintf function at all */
+#mesondefine HAVE_VSNPRINTF
+
+#ifdef HAVE_VSNPRINTF
+/* Define if the version of the 'vsnprintf' function honours the
+   size argument and has a proper return value. */
+#mesondefine HAVE_WORKING_VSNPRINTF
+#endif
+
 /* iconv() available */
 #mesondefine HAVE_ICONV
 
-#define ICONV_CONST const
+/* Defined to 'const' if iconv uses that */
+#mesondefine ICONV_CONST
 
 /* backtrace() available */
 #mesondefine HAVE_BACKTRACE
@@ -194,11 +248,17 @@
 /* bind() available */
 #mesondefine HAVE_BIND
 
+/* clock_gettime() available */
+#mesondefine HAVE_CLOCK_GETTIME
+
 /* connect() available */
 #mesondefine HAVE_CONNECT
 
 /* fdopen() available */
 #mesondefine HAVE_FDOPEN
+
+/* fopen_s() available */
+#mesondefine HAVE_FOPEN_S
 
 /* fileno() available */
 #mesondefine HAVE_FILENO
@@ -206,11 +266,22 @@
 /* flock() available */
 #mesondefine HAVE_FLOCK
 
+/* gettimeofday() available */
+#mesondefine HAVE_GETTIMEOFDAY
+
 /* ftime() available */
 #mesondefine HAVE_FTIME
 
 /* getaddrinfo() available */
 #mesondefine HAVE_GETADDRINFO
+
+/* getentropy() available */
+#mesondefine HAVE_GETENTROPY
+
+#ifdef HAVE_BCRYPT_H
+/* BCryptGenRandom() available */
+#mesondefine HAVE_BCRYPTGENRANDOM
+#endif
 
 /* gethostbyname() available */
 #mesondefine HAVE_GETHOSTBYNAME
@@ -251,6 +322,9 @@
 /* putenv() available */
 #mesondefine HAVE_PUTENV
 
+/* getcwd() available */
+#mesondefine HAVE_GETCWD
+
 /* select() available */
 #mesondefine HAVE_SELECT
 
@@ -281,14 +355,23 @@
 /* uname() available */
 #mesondefine HAVE_UNAME
 
+/* nanosleep() available */
+#mesondefine HAVE_NANOSLEEP
+
 /* usleep() available */
 #mesondefine HAVE_USLEEP
+
+/* Have C99 va_copy() */
+#mesondefine HAVE_VA_COPY
 
 /* vprintf() available */
 #mesondefine HAVE_VPRINTF
 
 /* vsnprintf() available */
 #mesondefine HAVE_VSNPRINTF
+
+/* localtime_r() available */
+#mesondefine HAVE_LOCALTIME_R
 
 /* _longjmp() available */
 #mesondefine HAVE__LONGJMP
@@ -311,9 +394,12 @@
 /* ioctl() available */
 #mesondefine HAVE_IOCTL
 
-#if defined(HAVE_FCNTL) || defined(HAVE_IOCTL)
+#if defined(HAVE_FCNTL) || defined(HAVE_IOCTL) || defined(FREECIV_HAVE_WINSOCK)
 #define NONBLOCKING_SOCKETS 1
 #endif
+
+/* Libcurl has the mime API */
+#mesondefine HAVE_CURL_MIME_API
 
 /* Custom path to CA cert bundle */
 #mesondefine CUSTOM_CACERT_PATH

@@ -26,6 +26,7 @@
 #include "log.h"
 #include "maphand.h" /* assign_continent_numbers(), MAP_NCONT */
 #include "mem.h"
+#include "nation.h"
 #include "rand.h"
 #include "shared.h"
 
@@ -152,7 +153,9 @@ static void make_rivers(void);
 
 static void river_types_init(void);
 
-#define HAS_POLES (wld.map.server.temperature < 70 && !wld.map.server.alltemperate)
+/* Note: Only use after calling generator_init_topology() */
+#define HAS_POLES \
+  (MIN(COLD_LEVEL, 2 * ICE_BASE_LEVEL) > MIN_REAL_COLATITUDE(wld.map))
 
 /* These are the old parameters of terrains types in %
    TODO: they depend on the hardcoded terrains */
@@ -237,17 +240,17 @@ struct DataFilter {
 };
 
 /**********************************************************************//**
-  A filter function to be passed to rand_map_pos_filtered().  See
+  A filter function to be passed to rand_map_pos_filtered(). See
   rand_map_pos_characteristic for more explanation.
 **************************************************************************/
 static bool condition_filter(const struct tile *ptile, const void *data)
 {
   const struct DataFilter *filter = data;
 
-  return  not_placed(ptile) 
-       && tmap_is(ptile, filter->tc) 
-       && test_wetness(ptile, filter->wc) 
-       && test_miscellaneous(ptile, filter->mc) ;
+  return not_placed(ptile)
+       && tmap_is(ptile, filter->tc)
+       && test_wetness(ptile, filter->wc)
+       && test_miscellaneous(ptile, filter->mc);
 }
 
 /**********************************************************************//**
@@ -259,11 +262,7 @@ static struct tile *rand_map_pos_characteristic(wetness_c wc,
                                                 temperature_type tc,
                                                 miscellaneous_c mc )
 {
-  struct DataFilter filter;
-
-  filter.wc = wc;
-  filter.tc = tc;
-  filter.mc = mc;
+  struct DataFilter filter = { .wc = wc, .tc = tc, .mc = mc };
 
   return rand_map_pos_filtered(&(wld.map), &filter, condition_filter);
 }
@@ -1524,8 +1523,8 @@ static void make_huts(int number)
 
   while (number > 0 && count++ < map_num_tiles() * 2) {
 
-    /* Add a hut.  But not on a polar area, or too close to another hut. */
-    if ((ptile = rand_map_pos_characteristic(WC_ALL, TT_NFROZEN, MC_NONE))) {
+    /* Add a hut.  But not too close to another hut. */
+    if ((ptile = rand_map_pos_characteristic(WC_ALL, TT_ALL, MC_NONE))) {
       struct extra_type *phut = rand_extra_for_tile(ptile, EC_HUT, TRUE);
 
       number--;
@@ -1566,19 +1565,10 @@ static void add_resources(int prob)
     }
     if (!is_ocean(pterrain) || near_safe_tiles(ptile)
         || wld.map.server.ocean_resources) {
-      int i = 0;
-      struct extra_type **r;
+      struct extra_type *res = pick_resource(pterrain);
 
-      for (r = pterrain->resources; *r; r++) {
-        /* This is a standard way to get a random element from the
-         * pterrain->resources list, without computing its length in
-         * advance. Note that if *(pterrain->resources) == NULL, then
-         * this loop is a no-op. */
-        if ((*r)->generated) {
-          if (0 == fc_rand(++i)) {
-            tile_set_resource(ptile, *r);
-          }
-        }
+      if (NULL != res) {
+        tile_set_resource(ptile, res);
       }
     }
   } whole_map_iterate_end;
@@ -2222,7 +2212,7 @@ static void initworld(struct gen234_state *pstate)
 #define DMSIS 10
 
 /**********************************************************************//**
-  island base map generators
+  Island base map generators
 **************************************************************************/
 static void mapgenerator2(void)
 {
@@ -2231,7 +2221,7 @@ static void mapgenerator2(void)
   struct gen234_state *pstate = &state;
   int i;
   bool done = FALSE;
-  int spares= 1; 
+  int spares = 1;
   /* constant that makes up that an island actually needs additional space */
 
   /* put 70% of land in big continents, 
@@ -2346,7 +2336,7 @@ static void mapgenerator3(void)
   pstate->totalmass = (((wld.map.ysize - 6 - spares) * wld.map.server.landpercent
                         * (wld.map.xsize - spares)) / 100);
 
-  bigislands= player_count();
+  bigislands = player_count();
 
   landmass = (wld.map.xsize * (wld.map.ysize - 6) * wld.map.server.landpercent)/100;
   /* subtracting the arctics */
@@ -2360,7 +2350,7 @@ static void mapgenerator3(void)
     islandmass = (landmass)/(2 * bigislands);
   }
   if (islandmass < 3 * maxmassdiv6 && player_count() * 2 < landmass) {
-    islandmass= (landmass)/(bigislands);
+    islandmass = (landmass)/(bigislands);
   }
 
   if (islandmass < 2) {
@@ -2394,7 +2384,7 @@ static void mapgenerator3(void)
       size = fc_rand((islandmass + 1) / 2 + 1);
     }
     if (size < 2) {
-      size=2;
+      size = 2;
     }
 
     make_island(size, (pstate->isleindex - 2 <= player_count()) ? 1 : 0,
@@ -2435,11 +2425,11 @@ static void mapgenerator4(void)
   }
 
   if (wld.map.server.landpercent > 60) {
-    bigweight=30;
+    bigweight = 30;
   } else if (wld.map.server.landpercent > 40) {
-    bigweight=50;
+    bigweight = 50;
   } else {
-    bigweight=70;
+    bigweight = 70;
   }
 
   spares = (wld.map.server.landpercent - 5) / 30;
@@ -2562,14 +2552,14 @@ fair_map_pos_tile(struct fair_tile *pmap, int x, int y)
 
   /* Wrap in X and Y directions, as needed. */
   if (nat_x < 0 || nat_x >= wld.map.xsize) {
-    if (current_topo_has_flag(TF_WRAPX)) {
+    if (current_wrap_has_flag(WRAP_X)) {
       nat_x = FC_WRAP(nat_x, wld.map.xsize);
     } else {
       return NULL;
     }
   }
   if (nat_y < 0 || nat_y >= wld.map.ysize) {
-    if (current_topo_has_flag(TF_WRAPY)) {
+    if (current_wrap_has_flag(WRAP_Y)) {
       nat_y = FC_WRAP(nat_y, wld.map.ysize);
     } else {
       return NULL;
@@ -2605,7 +2595,7 @@ fair_map_tile_border(struct fair_tile *pmap, struct fair_tile *ptile,
 
   index_to_native_pos(&nat_x, &nat_y, ptile - pmap);
 
-  if (!current_topo_has_flag(TF_WRAPX)
+  if (!current_wrap_has_flag(WRAP_X)
       && (nat_x < dist || nat_x >= wld.map.xsize - dist)) {
     return TRUE;
   }
@@ -2614,7 +2604,7 @@ fair_map_tile_border(struct fair_tile *pmap, struct fair_tile *ptile,
     dist *= 2;
   }
 
-  if (!current_topo_has_flag(TF_WRAPY)
+  if (!current_wrap_has_flag(WRAP_Y)
       && (nat_y < dist || nat_y >= wld.map.ysize - dist)) {
     return TRUE;
   }
@@ -2949,7 +2939,6 @@ fair_map_place_island_team(struct fair_tile *ptarget, int tx, int ty,
 static void fair_map_make_resources(struct fair_tile *pmap)
 {
   struct fair_tile *pftile, *pftile2;
-  struct extra_type **r;
   int i, j;
 
   for (i = 0; i < MAP_INDEX_SIZE; i++) {
@@ -2977,12 +2966,7 @@ static void fair_map_make_resources(struct fair_tile *pmap)
       }
     }
 
-    j = 0;
-    for (r = pftile->pterrain->resources; *r != NULL; r++) {
-      if (fc_rand(++j) == 0) {
-        pftile->presource = *r;
-      }
-    }
+    pftile->presource = pick_resource(pftile->pterrain);
     /* Note that 'pftile->presource' might be NULL if there is no suitable
      * resource for the terrain. */
     if (pftile->presource != NULL) {
@@ -3565,19 +3549,19 @@ static bool map_generate_fair_islands(void)
       }
 
       /* Make start point for teams. */
-      if (current_topo_has_flag(TF_WRAPX)) {
+      if (current_wrap_has_flag(WRAP_X)) {
         dx = fc_rand(wld.map.xsize);
       }
-      if (current_topo_has_flag(TF_WRAPY)) {
+      if (current_wrap_has_flag(WRAP_Y)) {
         dy = fc_rand(wld.map.ysize);
       }
       for (j = 0; j < teams_num; j++) {
         start_x[j] = (wld.map.xsize * (2 * j + 1)) / (2 * teams_num) + dx;
         start_y[j] = (wld.map.ysize * (2 * j + 1)) / (2 * teams_num) + dy;
-        if (current_topo_has_flag(TF_WRAPX)) {
+        if (current_wrap_has_flag(WRAP_X)) {
           start_x[j] = FC_WRAP(start_x[j], wld.map.xsize);
         }
-        if (current_topo_has_flag(TF_WRAPY)) {
+        if (current_wrap_has_flag(WRAP_Y)) {
           start_y[j] = FC_WRAP(start_y[j], wld.map.ysize);
         }
       }

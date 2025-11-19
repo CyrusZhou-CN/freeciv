@@ -36,6 +36,7 @@ struct functions {
   enum sset_type (*server_setting_type_get)(server_setting_id id);
   bool (*server_setting_val_bool_get)(server_setting_id id);
   int (*server_setting_val_int_get)(server_setting_id id);
+  unsigned int (*server_setting_val_bitwise_get)(server_setting_id id);
   void (*create_extra)(struct tile *ptile, struct extra_type *pextra,
                        struct player *pplayer);
   void (*destroy_extra)(struct tile *ptile, struct extra_type *pextra);
@@ -55,11 +56,11 @@ struct functions {
 extern const struct functions *fc_funcs;
 
 struct functions *fc_interface_funcs(void);
-void fc_interface_init(void);
-void free_libfreeciv(void);
+void libfreeciv_init(bool check_fc_interface);
+void libfreeciv_free(void);
 
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
 
-#endif  /* FC__FC_INTERFACE_H */
+#endif /* FC__FC_INTERFACE_H */

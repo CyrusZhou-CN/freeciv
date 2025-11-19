@@ -18,10 +18,11 @@ extern "C" {
 #endif /* __cplusplus */
 
 /* common */
-#include "base.h"
 #include "fc_types.h"
-#include "road.h"
-#include "terrain.h"
+#include "unittype.h"
+
+struct base_type;
+struct road_type;
 
 /* Used in the network protocol. */
 #define SPECENUM_NAME extra_flag_id
@@ -67,13 +68,15 @@ extern "C" {
 #define SPECENUM_VALUE16 EF_USER_FLAG_6
 #define SPECENUM_VALUE17 EF_USER_FLAG_7
 #define SPECENUM_VALUE18 EF_USER_FLAG_8
+#define SPECENUM_VALUE19 EF_USER_FLAG_9
+#define SPECENUM_VALUE20 EF_USER_FLAG_10
 
 #define SPECENUM_COUNT EF_COUNT
 #define SPECENUM_NAMEOVERRIDE
 #define SPECENUM_BITVECTOR bv_extra_flags
 #include "specenum_gen.h"
 
-#define EF_LAST_USER_FLAG EF_USER_FLAG_8
+#define EF_LAST_USER_FLAG EF_USER_FLAG_10
 #define MAX_NUM_USER_EXTRA_FLAGS (EF_LAST_USER_FLAG - EF_USER_FLAG_1 + 1)
 
 #define EXTRA_NONE (-1)
@@ -125,6 +128,8 @@ struct extra_type
   bv_extras conflicts;
   bv_extras hidden_by;
   bv_extras bridged_over; /* Needs "bridge" to get built over these extras */
+
+  int no_aggr_near_city;
 
   Tech_type_id visibility_req;
 
@@ -191,7 +196,7 @@ struct extra_type_list *extra_type_list_of_unit_hiders(void);
 #define is_extra_caused_by(e, c) (e->causes & (1 << c))
 bool is_extra_caused_by_worker_action(const struct extra_type *pextra);
 bool is_extra_caused_by_action(const struct extra_type *pextra,
-                               enum unit_activity act);
+                               const struct action *paction);
 
 void extra_to_removed_by_list(struct extra_type *pextra, enum extra_rmcause rmcause);
 struct extra_type_list *extra_type_list_by_rmcause(enum extra_rmcause rmcause);
@@ -199,7 +204,7 @@ struct extra_type_list *extra_type_list_by_rmcause(enum extra_rmcause rmcause);
 bool is_extra_removed_by(const struct extra_type *pextra, enum extra_rmcause rmcause);
 bool is_extra_removed_by_worker_action(const struct extra_type *pextra);
 bool is_extra_removed_by_action(const struct extra_type *pextra,
-                                enum unit_activity act);
+                                const struct action *paction);
 
 bool is_extra_card_near(const struct tile *ptile, const struct extra_type *pextra);
 bool is_extra_near_tile(const struct tile *ptile, const struct extra_type *pextra);
@@ -218,7 +223,7 @@ bool player_can_place_extra(const struct extra_type *pextra,
                             const struct player *pplayer,
                             const struct tile *ptile);
 
-bool can_remove_extra(struct extra_type *pextra,
+bool can_remove_extra(const struct extra_type *pextra,
                       const struct unit *punit,
                       const struct tile *ptile);
 bool player_can_remove_extra(const struct extra_type *pextra,
@@ -252,6 +257,7 @@ void set_user_extra_flag_name(enum extra_flag_id id,
                               const char *name,
                               const char *helptxt);
 const char *extra_flag_helptxt(enum extra_flag_id id);
+bool extra_flag_is_in_use(enum extra_flag_id id);
 
 bool extra_causes_env_upset(struct extra_type *pextra,
                             enum environment_upset_type upset);

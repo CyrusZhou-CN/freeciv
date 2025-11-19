@@ -29,12 +29,13 @@
 #include <SDL2/SDL.h>
 #endif /* SDL2_PLAIN_INCLUDE */
 
+/* client/include */
 #include "gui_main_g.h"
 
-/* enable this to adjust sizes for 320x240 resolution */
+/* Enable this to adjust sizes for 320x240 resolution */
 /* #define SMALL_SCREEN */
 
-/* SDL client Flags */
+/* SDL2 client Flags */
 #define CF_NONE				0
 #define CF_ORDERS_WIDGETS_CREATED	(1<<0)
 #define CF_MAP_UNIT_W_CREATED		(1<<1)
@@ -55,10 +56,11 @@
 #define CF_DRAW_PLAYERS_PEACE_STATUS	(1<<21)
 #define CF_DRAW_PLAYERS_ALLIANCE_STATUS	(1<<22)
 #define CF_DRAW_PLAYERS_NEUTRAL_STATUS	(1<<23)
+#define CF_SWRENDERER                   (1<<24)
 
-/* mouse button behavior */
-#define MB_MEDIUM_HOLD_DELAY  500         /* medium hold:  500ms */
-#define MB_LONG_HOLD_DELAY   2000         /* long hold:   2000ms */
+/* Mouse button behavior */
+#define MB_MEDIUM_HOLD_DELAY  500         /* Medium hold:  500ms */
+#define MB_LONG_HOLD_DELAY   2000         /* Long hold:   2000ms */
 
 /* Predicate for detecting basic widget activation events. */
 #define PRESSED_EVENT(event) (                                              \
@@ -90,7 +92,7 @@ struct mouse_button_behavior {
 };
 
 extern struct widget *selected_widget;
-extern Uint32 SDL_Client_Flags;
+extern Uint32 sdl2_client_flags;
 extern bool LSHIFT;
 extern bool RSHIFT;
 extern bool LCTRL;
@@ -107,20 +109,20 @@ void disable_focus_animation(void);
 extern int MOVE_STEP_X, MOVE_STEP_Y;
 int FilterMouseMotionEvents(void *data, SDL_Event *event);
 
-Uint16 gui_event_loop(void *pData, void (*loop_action)(void *pData),
-                      Uint16 (*key_down_handler)(SDL_Keysym Key, void *pData),
-                      Uint16 (*key_up_handler)(SDL_Keysym Key, void *pData),
-                      Uint16 (*textinput_handler)(char *text, void *pData),
-                      Uint16 (*finger_down_handler)(SDL_TouchFingerEvent *pTouchEvent, void *pData),
-                      Uint16 (*finger_up_handler)(SDL_TouchFingerEvent *pTouchEvent, void *pData),
-                      Uint16 (*finger_motion_handler)(SDL_TouchFingerEvent *pTouchEvent,
-                                                      void *pData),
-                      Uint16 (*mouse_button_down_handler)(SDL_MouseButtonEvent *pButtonEvent,
-                                                          void *pData),
-                      Uint16 (*mouse_button_up_handler)(SDL_MouseButtonEvent *pButtonEvent,
-                                                        void *pData),
-                      Uint16 (*mouse_motion_handler)(SDL_MouseMotionEvent *pMotionEvent,
-                                                     void *pData));
+Uint16 gui_event_loop(void *data, void (*loop_action)(void *data),
+                      Uint16 (*key_down_handler)(SDL_Keysym key, void *data),
+                      Uint16 (*key_up_handler)(SDL_Keysym key, void *data),
+                      Uint16 (*textinput_handler)(char *text, void *data),
+                      Uint16 (*finger_down_handler)(SDL_TouchFingerEvent *touch_event, void *data),
+                      Uint16 (*finger_up_handler)(SDL_TouchFingerEvent *touch_event, void *data),
+                      Uint16 (*finger_motion_handler)(SDL_TouchFingerEvent *touch_event,
+                                                      void *data),
+                      Uint16 (*mouse_button_down_handler)(SDL_MouseButtonEvent *button_event,
+                                                          void *data),
+                      Uint16 (*mouse_button_up_handler)(SDL_MouseButtonEvent *button_event,
+                                                        void *data),
+                      Uint16 (*mouse_motion_handler)(SDL_MouseMotionEvent *motion_event,
+                                                     void *data));
 
 /* shrink sizes for 320x240 screen */
 #ifdef SMALL_SCREEN
@@ -129,4 +131,4 @@ Uint16 gui_event_loop(void *pData, void (*loop_action)(void *pData),
   #define adj_size(size) (size)
 #endif
 
-#endif	/* FC__GUI_MAIN_H */
+#endif /* FC__GUI_MAIN_H */

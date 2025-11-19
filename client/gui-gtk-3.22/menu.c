@@ -60,6 +60,7 @@
 #include "optiondlg.h"
 #include "pages.h"
 #include "plrdlg.h"
+#include "rallypointdlg.h"
 #include "ratesdlg.h"
 #include "repodlgs.h"
 #include "sprite.h"
@@ -126,6 +127,18 @@ static void report_wow_callback(GtkMenuItem *item, gpointer data);
 static void report_top_cities_callback(GtkMenuItem *item, gpointer data);
 static void report_messages_callback(GtkMenuItem *item, gpointer data);
 static void report_demographic_callback(GtkMenuItem *item, gpointer data);
+static void bg_select0_callback(GtkMenuItem *item, gpointer data);
+static void bg_assign0_callback(GtkMenuItem *item, gpointer data);
+static void bg_append0_callback(GtkMenuItem *item, gpointer data);
+static void bg_select1_callback(GtkMenuItem *item, gpointer data);
+static void bg_assign1_callback(GtkMenuItem *item, gpointer data);
+static void bg_append1_callback(GtkMenuItem *item, gpointer data);
+static void bg_select2_callback(GtkMenuItem *item, gpointer data);
+static void bg_assign2_callback(GtkMenuItem *item, gpointer data);
+static void bg_append2_callback(GtkMenuItem *item, gpointer data);
+static void bg_select3_callback(GtkMenuItem *item, gpointer data);
+static void bg_assign3_callback(GtkMenuItem *item, gpointer data);
+static void bg_append3_callback(GtkMenuItem *item, gpointer data);
 static void help_overview_callback(GtkMenuItem *item, gpointer data);
 static void help_playing_callback(GtkMenuItem *item, gpointer data);
 static void help_policies_callback(GtkMenuItem *item, gpointer data);
@@ -188,6 +201,8 @@ static void show_unit_solid_bg_callback(GtkCheckMenuItem *item,
                                         gpointer data);
 static void show_unit_shields_callback(GtkCheckMenuItem *item,
                                        gpointer data);
+static void show_stack_size_callback(GtkCheckMenuItem *item,
+                                     gpointer data);
 static void show_focus_unit_callback(GtkCheckMenuItem *item, gpointer data);
 static void show_fog_of_war_callback(GtkCheckMenuItem *item, gpointer data);
 static void full_screen_callback(GtkCheckMenuItem *item, gpointer data);
@@ -209,6 +224,7 @@ static void select_same_type_tile_callback(GtkMenuItem *item, gpointer data);
 static void select_same_type_cont_callback(GtkMenuItem *item, gpointer data);
 static void select_same_type_callback(GtkMenuItem *item, gpointer data);
 static void select_dialog_callback(GtkMenuItem *item, gpointer data);
+static void rally_dialog_callback(GtkMenuItem *item, gpointer data);
 static void infra_dialog_callback(GtkMenuItem *item, gpointer data);
 static void unit_wait_callback(GtkMenuItem *item, gpointer data);
 static void unit_done_callback(GtkMenuItem *item, gpointer data);
@@ -219,8 +235,8 @@ static void unit_explore_callback(GtkMenuItem *item, gpointer data);
 static void unit_patrol_callback(GtkMenuItem *item, gpointer data);
 static void unit_sentry_callback(GtkMenuItem *item, gpointer data);
 static void unit_unsentry_callback(GtkMenuItem *item, gpointer data);
-static void unit_load_callback(GtkMenuItem *item, gpointer data);
-static void unit_unload_callback(GtkMenuItem *item, gpointer data);
+static void unit_board_callback(GtkMenuItem *item, gpointer data);
+static void unit_deboard_callback(GtkMenuItem *item, gpointer data);
 static void unit_unload_transporter_callback(GtkMenuItem *item,
                                              gpointer data);
 static void unit_homecity_callback(GtkMenuItem *item, gpointer data);
@@ -236,6 +252,7 @@ static void build_mine_callback(GtkMenuItem *item, gpointer data);
 static void plant_callback(GtkMenuItem *item, gpointer data);
 static void connect_road_callback(GtkMenuItem *item, gpointer data);
 static void connect_rail_callback(GtkMenuItem *item, gpointer data);
+static void connect_maglev_callback(GtkMenuItem *item, gpointer data);
 static void connect_irrigation_callback(GtkMenuItem *item, gpointer data);
 static void transform_terrain_callback(GtkMenuItem *item, gpointer data);
 static void clean_pollution_callback(GtkMenuItem *item, gpointer data);
@@ -243,6 +260,7 @@ static void clean_fallout_callback(GtkMenuItem *item, gpointer data);
 static void fortify_callback(GtkMenuItem *item, gpointer data);
 static void build_fortress_callback(GtkMenuItem *item, gpointer data);
 static void build_airbase_callback(GtkMenuItem *item, gpointer data);
+static void do_paradrop_callback(GtkMenuItem *item, gpointer data);
 static void do_pillage_callback(GtkMenuItem *item, gpointer data);
 static void diplomat_action_callback(GtkMenuItem *item, gpointer data);
 
@@ -255,6 +273,8 @@ static struct menu_entry_info menu_entries[] =
   { "MENU_IMPROVEMENTS", N_("_Improvements"), 0, 0,
     NULL, MGROUP_SAFE },
   { "MENU_CIVILIZATION", N_("C_ivilization"), 0, 0,
+    NULL, MGROUP_SAFE },
+  { "MENU_BATTLE_GROUPS", N_("_Battle Groups"), 0, 0,
     NULL, MGROUP_SAFE },
   { "MENU_HELP", N_("_Help"), 0, 0, NULL, MGROUP_SAFE },
   { "CLEAR_CHAT_LOGS", N_("_Clear Chat Log"), 0, 0,
@@ -287,6 +307,8 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(find_city_callback), MGROUP_SAFE },
   { "WORKLISTS", N_("Work_lists"), GDK_KEY_l, GDK_CONTROL_MASK,
     G_CALLBACK(worklists_callback), MGROUP_SAFE },
+  { "RALLY_DLG", N_("Rally point dialog"), GDK_KEY_r, GDK_CONTROL_MASK,
+    G_CALLBACK(rally_dialog_callback), MGROUP_SAFE },
   { "INFRA_DLG", N_("Infra dialog"), GDK_KEY_i, GDK_CONTROL_MASK,
     G_CALLBACK(infra_dialog_callback), MGROUP_SAFE },
   { "CLIENT_LUA_SCRIPT", N_("Client _Lua Script"), 0, 0,
@@ -301,12 +323,52 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(report_cities_callback), MGROUP_SAFE },
   { "REPORT_WOW", N_("_Wonders of the World"), GDK_KEY_F7, 0,
     G_CALLBACK(report_wow_callback), MGROUP_SAFE },
-  { "REPORT_TOP_CITIES", N_("Top _Five Cities"), GDK_KEY_F8, 0,
+  { "REPORT_TOP_CITIES", N_("Top Cities"), GDK_KEY_F8, 0,
     G_CALLBACK(report_top_cities_callback), MGROUP_SAFE },
   { "REPORT_MESSAGES", N_("_Messages"), GDK_KEY_F9, 0,
     G_CALLBACK(report_messages_callback), MGROUP_SAFE },
   { "REPORT_DEMOGRAPHIC", N_("_Demographics"), GDK_KEY_F11, 0,
     G_CALLBACK(report_demographic_callback), MGROUP_SAFE },
+
+  /* Battle Groups menu */
+  /* Note that user view: 1 - 4, internal: 0 - 3 */
+  { "BATTLE_GROUP_SELECT_0", N_("Select Battle Group 1"),
+    GDK_KEY_F1, GDK_SHIFT_MASK,
+    G_CALLBACK(bg_select0_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_ASSIGN_0", N_("Assign Battle Group 1"),
+    GDK_KEY_F1, GDK_CONTROL_MASK,
+    G_CALLBACK(bg_assign0_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_APPEND_0", N_("Append to Battle Group 1"),
+    GDK_KEY_F1, GDK_SHIFT_MASK | GDK_CONTROL_MASK,
+    G_CALLBACK(bg_append0_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_SELECT_1", N_("Select Battle Group 2"),
+    GDK_KEY_F2, GDK_SHIFT_MASK,
+    G_CALLBACK(bg_select1_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_ASSIGN_1", N_("Assign Battle Group 2"),
+    GDK_KEY_F2, GDK_CONTROL_MASK,
+    G_CALLBACK(bg_assign1_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_APPEND_1", N_("Append to Battle Group 2"),
+    GDK_KEY_F2, GDK_SHIFT_MASK | GDK_CONTROL_MASK,
+    G_CALLBACK(bg_append1_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_SELECT_2", N_("Select Battle Group 3"),
+    GDK_KEY_F3, GDK_SHIFT_MASK,
+    G_CALLBACK(bg_select2_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_ASSIGN_2", N_("Assign Battle Group 3"),
+    GDK_KEY_F3, GDK_CONTROL_MASK,
+    G_CALLBACK(bg_assign2_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_APPEND_2", N_("Append to Battle Group 3"),
+    GDK_KEY_F3, GDK_SHIFT_MASK | GDK_CONTROL_MASK,
+    G_CALLBACK(bg_append2_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_SELECT_3", N_("Select Battle Group 4"),
+    GDK_KEY_F4, GDK_SHIFT_MASK,
+    G_CALLBACK(bg_select3_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_ASSIGN_3", N_("Assign Battle Group 4"),
+    GDK_KEY_F4, GDK_CONTROL_MASK,
+    G_CALLBACK(bg_assign3_callback), MGROUP_SAFE },
+  { "BATTLE_GROUP_APPEND_3", N_("Append to Battle Group 4"),
+    GDK_KEY_F4, GDK_SHIFT_MASK | GDK_CONTROL_MASK,
+    G_CALLBACK(bg_append3_callback), MGROUP_SAFE },
+
   { "HELP_OVERVIEW", N_("?help:Overview"), 0, 0,
     G_CALLBACK(help_overview_callback), MGROUP_SAFE },
   { "HELP_PLAYING", N_("Strategy and Tactics"), 0, 0,
@@ -365,7 +427,7 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(edit_mode_callback), MGROUP_SAFE },
   { "SHOW_CITY_OUTLINES", N_("Cit_y Outlines"), GDK_KEY_y, GDK_CONTROL_MASK,
     G_CALLBACK(show_city_outlines_callback), MGROUP_SAFE },
-  { "SHOW_CITY_OUTPUT", N_("City Output"), GDK_KEY_w, GDK_CONTROL_MASK,
+  { "SHOW_CITY_OUTPUT", N_("City Output"), GDK_KEY_v, GDK_CONTROL_MASK,
     G_CALLBACK(show_city_output_callback), MGROUP_SAFE },
   { "SHOW_MAP_GRID", N_("Map _Grid"), GDK_KEY_g, GDK_CONTROL_MASK,
     G_CALLBACK(show_map_grid_callback), MGROUP_SAFE },
@@ -379,7 +441,7 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(show_city_names_callback), MGROUP_SAFE },
   { "SHOW_CITY_GROWTH", N_("City G_rowth"), GDK_KEY_o, GDK_CONTROL_MASK,
     G_CALLBACK(show_city_growth_callback), MGROUP_SAFE },
-  { "SHOW_CITY_PRODUCTIONS", N_("City _Production Levels"), GDK_KEY_p, GDK_CONTROL_MASK,
+  { "SHOW_CITY_PRODUCTIONS", N_("City _Production"), GDK_KEY_p, GDK_CONTROL_MASK,
     G_CALLBACK(show_city_productions_callback), MGROUP_SAFE },
   { "SHOW_CITY_BUY_COST", N_("City Buy Cost"), 0, 0,
     G_CALLBACK(show_city_buy_cost_callback), MGROUP_SAFE },
@@ -411,6 +473,9 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(show_unit_solid_bg_callback), MGROUP_SAFE },
   { "SHOW_UNIT_SHIELDS", N_("Unit shields"), 0, 0,
     G_CALLBACK(show_unit_shields_callback), MGROUP_SAFE },
+  { "SHOW_STACK_SIZE", N_("Unit Stack Size"),
+    GDK_KEY_plus, GDK_CONTROL_MASK,
+    G_CALLBACK(show_stack_size_callback), MGROUP_SAFE },
   { "SHOW_FOCUS_UNIT", N_("Focu_s Unit"), 0, 0,
     G_CALLBACK(show_focus_unit_callback), MGROUP_SAFE },
   { "SHOW_FOG_OF_WAR", N_("Fog of _War"), 0, 0,
@@ -420,7 +485,8 @@ static struct menu_entry_info menu_entries[] =
 
   { "RECALC_BORDERS", N_("Recalculate _Borders"), 0, 0,
     G_CALLBACK(recalc_borders_callback), MGROUP_EDIT },
-  { "TOGGLE_FOG", N_("Toggle Fog of _War"), GDK_KEY_m, GDK_CONTROL_MASK,
+  { "TOGGLE_FOG", N_("Toggle Fog of _War"), GDK_KEY_w,
+    GDK_CONTROL_MASK | GDK_SHIFT_MASK,
     G_CALLBACK(toggle_fog_callback), MGROUP_EDIT },
   { "SCENARIO_PROPERTIES", N_("Game/Scenario Properties"), 0, 0,
     G_CALLBACK(scenario_properties_callback), MGROUP_EDIT },
@@ -480,10 +546,10 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(unit_sentry_callback), MGROUP_UNIT },
   { "UNIT_UNSENTRY", N_("Uns_entry All On Tile"), GDK_KEY_s, GDK_SHIFT_MASK,
     G_CALLBACK(unit_unsentry_callback), MGROUP_UNIT },
-  { "UNIT_LOAD", N_("_Load"), GDK_KEY_l, 0,
-    G_CALLBACK(unit_load_callback), MGROUP_UNIT },
-  { "UNIT_UNLOAD", N_("_Unload"), GDK_KEY_u, 0,
-    G_CALLBACK(unit_unload_callback), MGROUP_UNIT },
+  { "UNIT_BOARD", N_("_Load"), GDK_KEY_l, 0,
+    G_CALLBACK(unit_board_callback), MGROUP_UNIT },
+  { "UNIT_DEBOARD", N_("_Unload"), GDK_KEY_u, 0,
+    G_CALLBACK(unit_deboard_callback), MGROUP_UNIT },
   { "UNIT_UNLOAD_TRANSPORTER", N_("U_nload All From Transporter"),
     GDK_KEY_t, GDK_SHIFT_MASK,
     G_CALLBACK(unit_unload_transporter_callback), MGROUP_UNIT },
@@ -513,6 +579,8 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(connect_road_callback), MGROUP_UNIT },
   { "CONNECT_RAIL", N_("Connect With Rai_l"), GDK_KEY_l, GDK_CONTROL_MASK,
     G_CALLBACK(connect_rail_callback), MGROUP_UNIT },
+  { "CONNECT_MAGLEV", N_("Connect With _Maglev"), GDK_KEY_m, GDK_CONTROL_MASK,
+    G_CALLBACK(connect_maglev_callback), MGROUP_UNIT },
   { "CONNECT_IRRIGATION", N_("Connect With Irri_gation"),
     GDK_KEY_i, GDK_CONTROL_MASK,
     G_CALLBACK(connect_irrigation_callback), MGROUP_UNIT },
@@ -528,6 +596,8 @@ static struct menu_entry_info menu_entries[] =
     G_CALLBACK(build_fortress_callback), MGROUP_UNIT },
   { "BUILD_AIRBASE", N_("Build Airbase"), GDK_KEY_e, GDK_SHIFT_MASK,
     G_CALLBACK(build_airbase_callback), MGROUP_UNIT },
+  { "DO_PARADROP", N_("P_aradrop"), GDK_KEY_j, 0,
+    G_CALLBACK(do_paradrop_callback), MGROUP_UNIT },
   { "DO_PILLAGE", N_("_Pillage"), GDK_KEY_p, GDK_SHIFT_MASK,
     G_CALLBACK(do_pillage_callback), MGROUP_UNIT },
   { "DIPLOMAT_ACTION", N_("_Do..."), GDK_KEY_d, 0,
@@ -722,7 +792,7 @@ static void report_wow_callback(GtkMenuItem *item, gpointer data)
 ****************************************************************************/
 static void report_top_cities_callback(GtkMenuItem *item, gpointer data)
 {
-  send_report_request(REPORT_TOP_5_CITIES);
+  send_report_request(REPORT_TOP_CITIES);
 }
 
 /************************************************************************//**
@@ -811,6 +881,102 @@ static void help_worklist_editor_callback(GtkMenuItem *item, gpointer data)
 static void help_cma_callback(GtkMenuItem *item, gpointer data)
 {
   popup_help_dialog_string(HELP_CMA_ITEM);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_SELECT_0" callback.
+****************************************************************************/
+static void bg_select0_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_select_battlegroup(0, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_ASSIGN_0" callback.
+****************************************************************************/
+static void bg_assign0_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(0, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_APPEND_0" callback.
+****************************************************************************/
+static void bg_append0_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(0, TRUE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_SELECT_1" callback.
+****************************************************************************/
+static void bg_select1_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_select_battlegroup(1, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_ASSIGN_1" callback.
+****************************************************************************/
+static void bg_assign1_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(1, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_APPEND_1" callback.
+****************************************************************************/
+static void bg_append1_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(1, TRUE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_SELECT_2" callback.
+****************************************************************************/
+static void bg_select2_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_select_battlegroup(2, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_ASSIGN_2" callback.
+****************************************************************************/
+static void bg_assign2_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(2, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_APPEND_2" callback.
+****************************************************************************/
+static void bg_append2_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(2, TRUE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_SELECT_3" callback.
+****************************************************************************/
+static void bg_select3_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_select_battlegroup(3, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_ASSIGN_3" callback.
+****************************************************************************/
+static void bg_assign3_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(3, FALSE);
+}
+
+/************************************************************************//**
+  Item "BATTLE_GROUP_APPEND_3" callback.
+****************************************************************************/
+static void bg_append3_callback(GtkMenuItem *item, gpointer data)
+{
+  key_unit_assign_battlegroup(3, TRUE);
 }
 
 /************************************************************************//**
@@ -981,7 +1147,7 @@ static void edit_mode_callback(GtkCheckMenuItem *item, gpointer data)
 {
   if (game.info.is_edit_mode ^ gtk_check_menu_item_get_active(item)) {
     key_editor_toggle();
-    /* Unreachbale techs in reqtree on/off */
+    /* Unreachable techs in reqtree on/off */
     science_report_dialog_popdown();
   }
 }
@@ -1245,6 +1411,17 @@ static void show_unit_shields_callback(GtkCheckMenuItem *item,
 }
 
 /************************************************************************//**
+  Item "SHOW_STACK_SIZE" callback.
+****************************************************************************/
+static void show_stack_size_callback(GtkCheckMenuItem *item,
+                                     gpointer data)
+{
+  if (gui_options.draw_unit_stack_size ^ gtk_check_menu_item_get_active(item)) {
+    key_unit_stack_size_toggle();
+  }
+}
+
+/************************************************************************//**
   Item "SHOW_FOCUS_UNIT" callback.
 ****************************************************************************/
 static void show_focus_unit_callback(GtkCheckMenuItem *item, gpointer data)
@@ -1367,6 +1544,14 @@ static void select_dialog_callback(GtkMenuItem *item, gpointer data)
 }
 
 /************************************************************************//**
+  Open rally point dialog.
+****************************************************************************/
+static void rally_dialog_callback(GtkMenuItem *item, gpointer data)
+{
+  rally_dialog_popup();
+}
+
+/************************************************************************//**
   Open infra placement dialog.
 ****************************************************************************/
 static void infra_dialog_callback(GtkMenuItem *item, gpointer data)
@@ -1403,16 +1588,47 @@ static void unit_goto_callback(GtkMenuItem *item, gpointer data)
 ****************************************************************************/
 static void unit_goto_and_callback(GtkMenuItem *item, gpointer data)
 {
-  struct action *action = data;
+  int sub_target = NO_TARGET;
+  struct action *paction = g_object_get_data(G_OBJECT(item), "end_action");
 
-  /* This menu doesn't support specifying a detailed target (think
-   * "Go to and..."->"Industrial Sabotage"->"City Walls") for the
-   * action order. */
-  fc_assert_ret_msg(!action_requires_details(action->id),
-                    "Underspecified target for %s.",
-                    action_id_name_translation(action->id));
+  fc_assert_ret(paction != NULL);
 
-  request_unit_goto(ORDER_PERFORM_ACTION, action->id, -1);
+  switch (action_get_sub_target_kind(paction)) {
+  case ASTK_BUILDING:
+    {
+      struct impr_type *pbuilding = g_object_get_data(G_OBJECT(item),
+                                                      "end_building");
+      fc_assert_ret(pbuilding != NULL);
+      sub_target = improvement_number(pbuilding);
+    }
+    break;
+  case ASTK_TECH:
+    {
+      struct advance *ptech = g_object_get_data(G_OBJECT(item),
+                                                "end_tech");
+      fc_assert_ret(ptech != NULL);
+      sub_target = advance_number(ptech);
+    }
+    break;
+  case ASTK_EXTRA:
+  case ASTK_EXTRA_NOT_THERE:
+    {
+      struct extra_type *pextra = g_object_get_data(G_OBJECT(item),
+                                                    "end_extra");
+      fc_assert_ret(pextra != NULL);
+      sub_target = extra_number(pextra);
+    }
+    break;
+  case ASTK_NONE:
+    sub_target = NO_TARGET;
+    break;
+  case ASTK_COUNT:
+    /* Should not exits */
+    fc_assert(action_get_sub_target_kind(paction) != ASTK_COUNT);
+    break;
+  }
+
+  request_unit_goto(ORDER_PERFORM_ACTION, paction->id, sub_target);
 }
 
 /************************************************************************//**
@@ -1468,19 +1684,19 @@ static void unit_unsentry_callback(GtkMenuItem *item, gpointer data)
 }
 
 /************************************************************************//**
-  Item "UNIT_LOAD" callback.
+  Item "UNIT_BOARD" callback.
 ****************************************************************************/
-static void unit_load_callback(GtkMenuItem *item, gpointer data)
+static void unit_board_callback(GtkMenuItem *item, gpointer data)
 {
   unit_list_iterate(get_units_in_focus(), punit) {
-    request_unit_load(punit, NULL, unit_tile(punit));
+    request_transport(punit, unit_tile(punit));
   } unit_list_iterate_end;
 }
 
 /************************************************************************//**
-  Item "UNIT_UNLOAD" callback.
+  Item "UNIT_DEBOARD" callback.
 ****************************************************************************/
-static void unit_unload_callback(GtkMenuItem *item, gpointer data)
+static void unit_deboard_callback(GtkMenuItem *item, gpointer data)
 {
   unit_list_iterate(get_units_in_focus(), punit) {
     request_unit_unload(punit);
@@ -1618,7 +1834,7 @@ static void plant_callback(GtkMenuItem *action, gpointer data)
 ****************************************************************************/
 static void connect_road_callback(GtkMenuItem *action, gpointer data)
 {
-  struct road_type *proad = road_by_compat_special(ROCO_ROAD);
+  struct road_type *proad = road_by_gui_type(ROAD_GUI_ROAD);
 
   if (proad != NULL) {
     struct extra_type *tgt;
@@ -1634,12 +1850,28 @@ static void connect_road_callback(GtkMenuItem *action, gpointer data)
 ****************************************************************************/
 static void connect_rail_callback(GtkMenuItem *action, gpointer data)
 {
-  struct road_type *prail = road_by_compat_special(ROCO_RAILROAD);
+  struct road_type *prail = road_by_gui_type(ROAD_GUI_RAILROAD);
 
   if (prail != NULL) {
     struct extra_type *tgt;
 
     tgt = road_extra_get(prail);
+
+    key_unit_connect(ACTIVITY_GEN_ROAD, tgt);
+  }
+}
+
+/************************************************************************//**
+  Action "CONNECT_MAGLEV" callback.
+****************************************************************************/
+static void connect_maglev_callback(GtkMenuItem *action, gpointer data)
+{
+  struct road_type *pmaglev = road_by_gui_type(ROAD_GUI_MAGLEV);
+
+  if (pmaglev != NULL) {
+    struct extra_type *tgt;
+
+    tgt = road_extra_get(pmaglev);
 
     key_unit_connect(ACTIVITY_GEN_ROAD, tgt);
   }
@@ -1675,8 +1907,6 @@ static void transform_terrain_callback(GtkMenuItem *action, gpointer data)
 static void clean_pollution_callback(GtkMenuItem *action, gpointer data)
 {
   unit_list_iterate(get_units_in_focus(), punit) {
-    /* FIXME: this can provide different actions for different units...
-     * not good! */
     struct extra_type *pextra;
 
     pextra = prev_extra_in_tile(unit_tile(punit), ERM_CLEANPOLLUTION,
@@ -1684,10 +1914,6 @@ static void clean_pollution_callback(GtkMenuItem *action, gpointer data)
 
     if (pextra != NULL) {
       request_new_unit_activity_targeted(punit, ACTIVITY_POLLUTION, pextra);
-    } else if (can_unit_paradrop(punit)) {
-      /* FIXME: This is getting worse, we use a key_unit_*() function
-       * which assign the order for all units!  Very bad! */
-      key_unit_paradrop();
     }
   } unit_list_iterate_end;
 }
@@ -1724,6 +1950,14 @@ static void fortify_callback(GtkMenuItem *action, gpointer data)
 static void build_airbase_callback(GtkMenuItem *action, gpointer data)
 {
   key_unit_airbase();
+}
+
+/************************************************************************//**
+  Action "DO_PARADROP" callback.
+****************************************************************************/
+static void do_paradrop_callback(GtkMenuItem *action, gpointer data)
+{
+  key_unit_paradrop();
 }
 
 /************************************************************************//**
@@ -1962,7 +2196,7 @@ GtkWidget *setup_menus(GtkWidget *window)
 }
 
 /************************************************************************//**
-  Find menu entry constrution data
+  Find menu entry construction data
 ****************************************************************************/
 static struct menu_entry_info *menu_entry_info_find(const char *key)
 {
@@ -2080,6 +2314,8 @@ static void view_menu_update_sensitivity(void)
                            gui_options.draw_units || gui_options.draw_focus_unit);
   menu_entry_set_sensitive("SHOW_UNIT_SHIELDS",
                            gui_options.draw_units || gui_options.draw_focus_unit);
+  menu_entry_set_sensitive("SHOW_STACK_SIZE",
+                           gui_options.draw_units || gui_options.draw_focus_unit);
   menu_entry_set_sensitive("SHOW_FOCUS_UNIT", !gui_options.draw_units);
 }
 
@@ -2110,6 +2346,7 @@ void real_menus_update(void)
   bool units_all_same_tile = TRUE, units_all_same_type = TRUE;
   GtkMenu *menu;
   char acttext[128], irrtext[128], mintext[128], transtext[128];
+  char cultext[128], plantext[128];
   struct terrain *pterrain;
   bool conn_possible;
   struct road_type *proad;
@@ -2122,9 +2359,11 @@ void real_menus_update(void)
   if (get_num_units_in_focus() > 0) {
     const struct tile *ptile = NULL;
     const struct unit_type *ptype = NULL;
+
     punits = get_units_in_focus();
     unit_list_iterate(punits, punit) {
-      fc_assert((ptile==NULL) == (ptype==NULL));
+      fc_assert((ptile == NULL) == (ptype == NULL));
+
       if (ptile || ptype) {
         if (unit_tile(punit) != ptile) {
           units_all_same_tile = FALSE;
@@ -2149,12 +2388,13 @@ void real_menus_update(void)
   menu_entry_set_sensitive("EDIT_MODE",
                            can_conn_enable_editing(&client.conn));
   editgui_refresh();
-  menu_entry_set_sensitive("INFRA_DLG", game.info.infrapoints > 0);
+  menu_entry_set_sensitive("RALLY_DLG", can_client_issue_orders());
+  menu_entry_set_sensitive("INFRA_DLG", terrain_control.infrapoints);
 
   {
     char road_buf[500];
 
-    proad = road_by_compat_special(ROCO_ROAD);
+    proad = road_by_gui_type(ROAD_GUI_ROAD);
     if (proad != NULL) {
       /* TRANS: Connect with some road type (Road/Railroad) */
       snprintf(road_buf, sizeof(road_buf), _("Connect With %s"),
@@ -2162,12 +2402,35 @@ void real_menus_update(void)
       menus_rename("CONNECT_ROAD", road_buf);
     }
 
-    proad = road_by_compat_special(ROCO_RAILROAD);
+    proad = road_by_gui_type(ROAD_GUI_RAILROAD);
     if (proad != NULL) {
       snprintf(road_buf, sizeof(road_buf), _("Connect With %s"),
                extra_name_translation(road_extra_get(proad)));
       menus_rename("CONNECT_RAIL", road_buf);
     }
+
+    proad = road_by_gui_type(ROAD_GUI_MAGLEV);
+    if (proad != NULL) {
+      snprintf(road_buf, sizeof(road_buf), _("Connect With %s"),
+               extra_name_translation(road_extra_get(proad)));
+      menus_rename("CONNECT_MAGLEV", road_buf);
+    }
+  }
+
+  {
+    char top_cities_buf[128];
+
+    if (game.info.top_cities_count > 0) {
+      fc_snprintf(top_cities_buf, sizeof(top_cities_buf),
+                  PL_("Top %d City", "Top %d Cities",
+                      game.info.top_cities_count),
+                  game.info.top_cities_count);
+      menus_rename("REPORT_TOP_CITIES", top_cities_buf);
+    } else {
+      menus_rename("REPORT_TOP_CITIES", _("Top Cities"));
+    }
+
+    menu_entry_set_sensitive("REPORT_TOP_CITIES", game.info.top_cities_count > 0);
   }
 
   if (!can_client_issue_orders()) {
@@ -2296,12 +2559,13 @@ void real_menus_update(void)
   menu_entry_set_sensitive("BUILD_AIRBASE",
                            can_units_do_base_gui(punits, BASE_GUI_AIRBASE));
   menu_entry_set_sensitive("CLEAN_POLLUTION",
-                           (can_units_do_activity(punits, ACTIVITY_POLLUTION)
-                            || can_units_do(punits, can_unit_paradrop)));
+                           can_units_do_activity(punits, ACTIVITY_POLLUTION));
   menu_entry_set_sensitive("CLEAN_FALLOUT",
                            can_units_do_activity(punits, ACTIVITY_FALLOUT));
   menu_entry_set_sensitive("UNIT_SENTRY",
                            can_units_do_activity(punits, ACTIVITY_SENTRY));
+  menu_entry_set_sensitive("DO_PARADROP",
+                           can_units_do(punits, can_unit_paradrop));
   /* FIXME: should conditionally rename "Pillage" to "Pillage..." in cases where
    * selecting the command results in a dialog box listing options of what to pillage */
   menu_entry_set_sensitive("DO_PILLAGE",
@@ -2316,9 +2580,9 @@ void real_menus_update(void)
                            can_units_do(punits, can_unit_change_homecity));
   menu_entry_set_sensitive("UNIT_UNLOAD_TRANSPORTER",
                            units_are_occupied(punits));
-  menu_entry_set_sensitive("UNIT_LOAD",
+  menu_entry_set_sensitive("UNIT_BOARD",
                            units_can_load(punits));
-  menu_entry_set_sensitive("UNIT_UNLOAD",
+  menu_entry_set_sensitive("UNIT_DEBOARD",
                            units_can_unload(punits));
   menu_entry_set_sensitive("UNIT_UNSENTRY", 
                            units_have_activity_on_tile(punits,
@@ -2328,7 +2592,7 @@ void real_menus_update(void)
   menu_entry_set_sensitive("UNIT_EXPLORE",
                            can_units_do_activity(punits, ACTIVITY_EXPLORE));
 
-  proad = road_by_compat_special(ROCO_ROAD);
+  proad = road_by_gui_type(ROAD_GUI_ROAD);
   if (proad != NULL) {
     struct extra_type *tgt;
 
@@ -2340,7 +2604,7 @@ void real_menus_update(void)
   }
   menu_entry_set_sensitive("CONNECT_ROAD", conn_possible);
 
-  proad = road_by_compat_special(ROCO_RAILROAD);
+  proad = road_by_gui_type(ROAD_GUI_RAILROAD);
   if (proad != NULL) {
     struct extra_type *tgt;
 
@@ -2351,6 +2615,18 @@ void real_menus_update(void)
     conn_possible = FALSE;
   }
   menu_entry_set_sensitive("CONNECT_RAIL", conn_possible);
+
+  proad = road_by_gui_type(ROAD_GUI_MAGLEV);
+  if (proad != NULL) {
+    struct extra_type *tgt;
+
+    tgt = road_extra_get(proad);
+
+    conn_possible = can_units_do_connect(punits, ACTIVITY_GEN_ROAD, tgt);
+  } else {
+    conn_possible = FALSE;
+  }
+  menu_entry_set_sensitive("CONNECT_MAGLEV", conn_possible);
 
   extras = extra_type_list_by_cause(EC_IRRIGATION);
 
@@ -2411,7 +2687,7 @@ void real_menus_update(void)
     } unit_list_iterate_end;
 
     if (pextra != NULL) {
-      /* TRANS: Build road of specific type (Road/Railroad) */
+      /* TRANS: Build road of specific type (Road/Railroad/Maglev) */
       snprintf(road_item, sizeof(road_item), _("Build %s"),
                extra_name_translation(pextra));
       menus_rename("BUILD_ROAD", road_item);
@@ -2422,7 +2698,7 @@ void real_menus_update(void)
 
   if (units_all_same_type) {
     struct unit *punit = unit_list_get(punits, 0);
-    struct unit_type *to_unittype =
+    const struct unit_type *to_unittype =
       can_upgrade_unittype(client_player(), unit_type_get(punit));
     if (to_unittype) {
       /* TRANS: %s is a unit type. */
@@ -2466,12 +2742,8 @@ void real_menus_update(void)
     struct unit *first = unit_list_get(punits, 0);
 
     pterrain = tile_terrain(unit_tile(first));
-    if (pterrain->irrigation_result != T_NONE
-        && pterrain->irrigation_result != pterrain) {
-      fc_snprintf(irrtext, sizeof(irrtext), _("Change to %s"),
-                  get_tile_change_menu_text(unit_tile(first),
-                                            ACTIVITY_IRRIGATE));
-    } else if (units_have_type_flag(punits, UTYF_SETTLERS, TRUE)) {
+
+    if (units_have_type_flag(punits, UTYF_SETTLERS, TRUE)) {
       struct extra_type *pextra = NULL;
 
       /* FIXME: this overloading doesn't work well with multiple focus
@@ -2495,11 +2767,15 @@ void real_menus_update(void)
       sz_strlcpy(irrtext, _("Build _Irrigation"));
     }
 
-    if (pterrain->mining_result != T_NONE
-        && pterrain->mining_result != pterrain) {
-      fc_snprintf(mintext, sizeof(mintext), _("Change to %s"),
-                  get_tile_change_menu_text(unit_tile(first), ACTIVITY_MINE));
-    } else if (units_have_type_flag(punits, UTYF_SETTLERS, TRUE)) {
+    if (pterrain->cultivate_result != T_NONE) {
+      fc_snprintf(cultext, sizeof(cultext), _("Change to %s"),
+                  get_tile_change_menu_text(unit_tile(first),
+                                            ACTIVITY_CULTIVATE));
+    } else {
+      sz_strlcpy(cultext, _("_Cultivate"));
+    }
+
+    if (units_have_type_flag(punits, UTYF_SETTLERS, TRUE)) {
       struct extra_type *pextra = NULL;
 
       /* FIXME: this overloading doesn't work well with multiple focus
@@ -2523,6 +2799,13 @@ void real_menus_update(void)
       sz_strlcpy(mintext, _("Build _Mine"));
     }
 
+    if (pterrain->plant_result != T_NONE) {
+      fc_snprintf(plantext, sizeof(plantext), _("Change to %s"),
+                  get_tile_change_menu_text(unit_tile(first), ACTIVITY_PLANT));
+    } else {
+      sz_strlcpy(plantext, _("_Plant"));
+    }
+
     if (pterrain->transform_result != T_NONE
         && pterrain->transform_result != pterrain) {
       fc_snprintf(transtext, sizeof(transtext), _("Transf_orm to %s"),
@@ -2533,20 +2816,17 @@ void real_menus_update(void)
     }
   } else {
     sz_strlcpy(irrtext, _("Build _Irrigation"));
+    sz_strlcpy(cultext, _("_Cultivate"));
     sz_strlcpy(mintext, _("Build _Mine"));
+    sz_strlcpy(plantext, _("_Plant"));
     sz_strlcpy(transtext, _("Transf_orm Terrain"));
   }
 
   menus_rename("BUILD_IRRIGATION", irrtext);
+  menus_rename("CULTIVATE", cultext);
   menus_rename("BUILD_MINE", mintext);
+  menus_rename("PLANT", plantext);
   menus_rename("TRANSFORM_TERRAIN", transtext);
-
-  if (units_can_do_action(punits, ACTION_PARADROP, TRUE)) {
-    menus_rename("CLEAN_POLLUTION",
-                 action_get_ui_name_mnemonic(ACTION_PARADROP, "_"));
-  } else {
-    menus_rename("CLEAN_POLLUTION", _("Clean _Pollution"));
-  }
 
   menus_rename("UNIT_HOMECITY",
                action_get_ui_name_mnemonic(ACTION_HOME_CITY, "_"));
@@ -2574,6 +2854,25 @@ static void menu_unit_goto_and_add_accel(GtkWidget *item, action_id act_id,
     gtk_accel_map_add_entry(gtk_menu_item_get_accel_path(GTK_MENU_ITEM(item)),
                             accel_key, accel_mods);
   }
+}
+
+/************************************************************************//**
+  Recursively remove previous entries in a menu and its sub menus.
+****************************************************************************/
+static void menu_remove_previous_entries(GtkMenu *menu)
+{
+  GList *list, *iter;
+  GtkWidget *sub_menu;
+
+  list = gtk_container_get_children(GTK_CONTAINER(menu));
+  for (iter = list; NULL != iter; iter = g_list_next(iter)) {
+    if ((sub_menu = gtk_menu_item_get_submenu(iter->data)) != NULL) {
+      menu_remove_previous_entries(GTK_MENU(sub_menu));
+      gtk_widget_destroy(sub_menu);
+    }
+    gtk_widget_destroy(GTK_WIDGET(iter->data));
+  }
+  g_list_free(list);
 }
 
 /************************************************************************//**
@@ -2694,16 +2993,11 @@ void real_menus_init(void)
 
   /* Initialize the Go to and... actions. */
   if ((menu = find_menu("<MENU>/GOTO_AND"))) {
-    GList *list, *iter;
     GtkWidget *item;
     int tgt_kind_group;
 
     /* Remove previous action entries. */
-    list = gtk_container_get_children(GTK_CONTAINER(menu));
-    for (iter = list; NULL != iter; iter = g_list_next(iter)) {
-      gtk_widget_destroy(GTK_WIDGET(iter->data));
-    }
-    g_list_free(list);
+    menu_remove_previous_entries(menu);
 
     /* Add the new action entries grouped by target kind. */
     for (tgt_kind_group = 0; tgt_kind_group < ATK_COUNT; tgt_kind_group++) {
@@ -2720,39 +3014,78 @@ void real_menus_init(void)
           continue;
         }
 
-        if (action_requires_details(act_id)) {
-          /* This menu doesn't support specifying a detailed target (think
-           * "Go to and..."->"Industrial Sabotage"->"City Walls") for the
-           * action order. */
-          continue;
-        }
-
-        if (action_id_distance_inside_max(act_id, 2)) {
-          /* The order system doesn't support actions that can be done to a
-           * target that isn't at or next to the actor unit's tile.
-           *
-           * Full explanation in handle_unit_orders(). */
-          continue;
-        }
-
         /* Create and add the menu item. It will be hidden or shown based on
          * unit type.  */
         item = gtk_menu_item_new_with_mnemonic(
               action_get_ui_name_mnemonic(act_id, "_"));
         g_object_set_data(G_OBJECT(item), "end_action", paction);
-        g_signal_connect(item, "activate",
-                         G_CALLBACK(unit_goto_and_callback), paction);
+
+        if (action_id_has_complex_target(act_id)) {
+          GtkWidget *sub_target_menu = gtk_menu_new();
+
+#define CREATE_SUB_ITEM(_sub_target_, _sub_target_key_, _sub_target_name_) \
+  GtkWidget *sub_item = gtk_menu_item_new_with_label(_sub_target_name_);   \
+  g_object_set_data(G_OBJECT(sub_item), "end_action", paction);            \
+  g_object_set_data(G_OBJECT(sub_item), _sub_target_key_, _sub_target_);   \
+  g_signal_connect(sub_item, "activate",                                   \
+                   G_CALLBACK(unit_goto_and_callback), paction);           \
+  gtk_menu_shell_append(GTK_MENU_SHELL(sub_target_menu), sub_item);        \
+  gtk_widget_show(sub_item);
+
+          switch (action_get_sub_target_kind(paction)) {
+          case ASTK_BUILDING:
+            improvement_iterate(pimpr) {
+              CREATE_SUB_ITEM(pimpr, "end_building",
+                              improvement_name_translation(pimpr));
+            } improvement_iterate_end;
+            break;
+          case ASTK_TECH:
+            advance_iterate(ptech) {
+              CREATE_SUB_ITEM(ptech, "end_tech",
+                              advance_name_translation(ptech));
+            } advance_iterate_end;
+            break;
+          case ASTK_EXTRA:
+          case ASTK_EXTRA_NOT_THERE:
+            extra_type_iterate(pextra) {
+              if (!(action_creates_extra(paction, pextra)
+                    || action_removes_extra(paction, pextra))) {
+                /* Not relevant */
+                continue;
+              }
+              CREATE_SUB_ITEM(pextra, "end_extra",
+                              extra_name_translation(pextra));
+            } extra_type_iterate_end;
+            break;
+          case ASTK_NONE:
+            /* Should not be here. */
+            fc_assert(action_get_sub_target_kind(paction) != ASTK_NONE);
+            break;
+          case ASTK_COUNT:
+            /* Should not exits */
+            fc_assert(action_get_sub_target_kind(paction) != ASTK_COUNT);
+            break;
+          }
+
+#undef CREATE_SUB_ITEM
+
+          gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), sub_target_menu);
+        } else {
+          g_signal_connect(item, "activate",
+                           G_CALLBACK(unit_goto_and_callback), paction);
 
 #define ADD_OLD_ACCELERATOR(wanted_action_id, accel_key, accel_mods)      \
   if (act_id == wanted_action_id) {                                    \
     menu_unit_goto_and_add_accel(item, act_id, accel_key, accel_mods); \
   }
 
-        /* Add the keyboard shortcuts for "Go to and..." menu items that
-         * existed independently before the "Go to and..." menu arrived. */
-        ADD_OLD_ACCELERATOR(ACTION_FOUND_CITY, GDK_KEY_b, GDK_SHIFT_MASK);
-        ADD_OLD_ACCELERATOR(ACTION_JOIN_CITY, GDK_KEY_j, GDK_SHIFT_MASK);
-        ADD_OLD_ACCELERATOR(ACTION_NUKE, GDK_KEY_n, GDK_SHIFT_MASK);
+          /* Add the keyboard shortcuts for "Go to and..." menu items that
+           * existed independently before the "Go to and..." menu arrived.
+           */
+          ADD_OLD_ACCELERATOR(ACTION_FOUND_CITY, GDK_KEY_b, GDK_SHIFT_MASK);
+          ADD_OLD_ACCELERATOR(ACTION_JOIN_CITY, GDK_KEY_j, GDK_SHIFT_MASK);
+          ADD_OLD_ACCELERATOR(ACTION_NUKE, GDK_KEY_n, GDK_SHIFT_MASK);
+        }
 
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
         gtk_widget_show(item);
@@ -2819,6 +3152,8 @@ void real_menus_init(void)
                         gui_options.solid_color_behind_units);
   menu_entry_set_active("SHOW_UNIT_SHIELDS",
                         gui_options.draw_unit_shields);
+  menu_entry_set_active("SHOW_STACK_SIZE",
+                        gui_options.draw_unit_stack_size);
   menu_entry_set_active("SHOW_FOCUS_UNIT",
                         gui_options.draw_focus_unit);
   menu_entry_set_active("SHOW_FOG_OF_WAR",
@@ -2827,4 +3162,15 @@ void real_menus_init(void)
   view_menu_update_sensitivity();
 
   menu_entry_set_active("FULL_SCREEN", GUI_GTK_OPTION(fullscreen));
+}
+
+/**************************************************************************
+  Free resources allocated by the menu system.
+**************************************************************************/
+void menus_free(void)
+{
+  if (ui_builder != NULL) {
+    g_object_unref(ui_builder);
+    ui_builder = NULL;
+  }
 }

@@ -2,7 +2,7 @@
 [spec]
 
 ; Format and options of this spec file:
-options = "+Freeciv-spec-Devel-2019-Jul-03"
+options = "+Freeciv-spec-3.2-Devel-2023.Jan.01"
 
 [info]
 
@@ -51,6 +51,7 @@ tiles = { "row", "column", "tag"
   1,  3,  "e_treaty_ceasefire"
   1,  4,  "e_treaty_broken"
   1,  5,  "e_treaty_embassy"
+  1,  0,  "e_treaty_shared_tiles"
 
   1,  6, "e_imp_buy"
   1,  7, "e_imp_build"
@@ -73,13 +74,14 @@ tiles = { "row", "column", "tag"
   2,  5, "e_hut_settler"
   2,  6, "e_hut_tech"
   2,  7, "e_hut_barb_city_near"
+  4, 10, "e_hut_map"
 
   2,  8, "e_tech_gain"
   2,  9, "e_tech_learned"
   2, 10, "e_tech_lost"
   2, 11, "e_tech_embassy"
   2, 11, "e_tech_goal"
- 
+
   3,  0,  "e_unit_lost_att"
   3,  1,  "e_unit_win_att"
   3,  1,  "e_unit_action_actor_success"
@@ -145,6 +147,7 @@ tiles = { "row", "column", "tag"
   6,  4, "e_message_wall"
   6,  4, "e_connection"
   6,  4, "e_multiplier"
+  6,  4, "e_infrapoints"
   6,  5, "e_destroyed"
   6,  6, "e_low_on_funds"
   6,  7, "e_pollution" ; copy from small.png

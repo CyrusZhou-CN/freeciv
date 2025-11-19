@@ -17,7 +17,7 @@
 
 #include <stdio.h>
 
-#include <gtk/gtk.h>  
+#include <gtk/gtk.h>
 
 /* utility */
 #include "fcintl.h"
@@ -49,7 +49,7 @@ static void input_dialog_response(GtkDialog *shell, gint response,
                         gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(winput))));
 
   /* Any response is final */
-  gtk_widget_destroy(GTK_WIDGET(shell));
+  gtk_window_destroy(GTK_WINDOW(shell));
   FC_FREE(cb);
 }
 
@@ -64,7 +64,7 @@ static void input_dialog_close(GtkDialog *shell, gpointer data)
 /**********************************************************************//**
   Create a popup with a text entry box and "OK" and "Cancel" buttons.
 **************************************************************************/
-GtkWidget *input_dialog_create(GtkWindow *parent, const char *dialogname, 
+GtkWidget *input_dialog_create(GtkWindow *parent, const char *dialogname,
                                const char *text, const char *postinputtest,
                                input_dialog_callback_t response_callback,
                                gpointer response_cli_data)
@@ -85,14 +85,13 @@ GtkWidget *input_dialog_create(GtkWindow *parent, const char *dialogname,
   setup_dialog(shell, GTK_WIDGET(parent));
   g_signal_connect(shell, "response", G_CALLBACK(input_dialog_response), cb);
   g_signal_connect(shell, "close", G_CALLBACK(input_dialog_close), cb);
-  gtk_window_set_position(GTK_WINDOW(shell), GTK_WIN_POS_CENTER_ON_PARENT);
 
   label = gtk_frame_new(text);
-  gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(shell))),
-                     label);
+  gtk_box_insert_child_after(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(shell))),
+                             label, NULL);
 
   input = gtk_entry_new();
-  gtk_container_add(GTK_CONTAINER(label), input);
+  gtk_frame_set_child(GTK_FRAME(label), input);
   gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(input)), postinputtest, -1);
   gtk_entry_set_activates_default(GTK_ENTRY(input), TRUE);
   g_object_set_data(G_OBJECT(shell), "iinput", input);
